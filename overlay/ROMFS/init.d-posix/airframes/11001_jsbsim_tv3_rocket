@@ -1,0 +1,12 @@
+#!/bin/sh
+#
+# @name TV3 Rocket (JSBSim)
+# @type Rocket
+#
+
+. ${R}etc/init.d-posix/rc.tv3_rocket_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=jsbsim}
+param set-default SYS_HITL 1
+param set-default MAV_USEHILGPS 1
+. ${R}etc/init.d-posix/airframes/tv3_rocket_common.inc

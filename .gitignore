@@ -1,0 +1,11 @@
+.work/
+vendor/
+runtime/nuttx/fs/microsd/
+build/
+dist/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.swp
+.DS_Store

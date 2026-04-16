@@ -1,0 +1,80 @@
+name: tv3_v1
+description: TV3 single-motor TVC rocket baseline for PX4 v1.
+hardware:
+  autopilot: cube_orange_plus
+  carrier: mini_carrier
+  telemetry: rfd900
+  gps:
+    rover: here4_rtk
+    base: here4_rtk_base
+  ignition_output_function: 450
+  tvc_pitch_output_function: 201
+  tvc_yaw_output_function: 202
+  load_cell:
+    driver: ads1115
+    source: 0
+    adc_channel: 0
+    calibration:
+      tare: 0.0
+      scale: 1.0
+    alpha: 0.25
+    timeout_ms: 200
+vehicle:
+  body_mass_kg: 6.5
+  body_com_x_m: 0.95
+  motor_com_x_m: 0.15
+  motor_loaded_mass_kg: 0.75
+  motor_dry_mass_kg: 0.28
+  rail_length_m: 3.5
+  tvc_max_deg: 5.0
+  tvc_slew_dps: 250.0
+  ca_reference_thrust_n: 250.0
+  ca_minimum_thrust_n: 20.0
+  ca_fallback_thrust_n: 60.0
+  torque_limits_nm:
+    pitch: 10.0
+    yaw: 10.0
+controller:
+  attitude_p:
+    rail: 2.0
+    free: 3.0
+  rate_p:
+    rail: 0.35
+    free: 0.5
+  rate_i: 0.04
+  rate_d: 0.003
+state_machine:
+  command_source: 1
+  ignition_pulse_ms: 300
+  ignition_timeout_ms: 2000
+  launch_threshold_n: 10.0
+  burnout_threshold_n: 4.0
+  burnout_dwell_ms: 100
+  minimum_burn_ms: 150
+  maximum_burn_ms: 6000
+motor_selection:
+  index: 0
+  catalog_root: /fs/microsd/tv3/motors
+guidance:
+  enable: 1
+  takeoff_alt_m: 35.0
+  apex_alt_m: 120.0
+  pos_p: 0.15
+  vel_max_m_s: 30.0
+  vel_up_m_s: 15.0
+  vel_dn_m_s: 8.0
+  yaw_deg: 0.0
+  hold_alt_m: 5.0
+  acceptance_m: 15.0
+  wp1_n_m: 60.0
+  wp1_e_m: 0.0
+  wp1_d_m: -60.0
+  wp2_n_m: 150.0
+  wp2_e_m: 30.0
+  wp2_d_m: -90.0
+  wp3_n_m: 220.0
+  wp3_e_m: 80.0
+  wp3_d_m: -75.0
+  land_n_m: 0.0
+  land_e_m: 0.0
+  land_d_m: 0.0

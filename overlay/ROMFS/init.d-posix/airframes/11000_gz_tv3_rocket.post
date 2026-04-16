@@ -1,0 +1,3 @@
+#!/bin/sh
+
+. ${R}etc/init.d-posix/airframes/tv3_rocket_common.post

@@ -1,0 +1,10 @@
+set(config_msg_list_external
+	RocketCommand.msg
+	RocketStatus.msg
+	RocketThrust.msg
+	RocketMotorReference.msg
+	RocketModeStatus.msg
+	RocketGuidanceStatus.msg
+	RocketLoadCell.msg
+	PARENT_SCOPE
+)

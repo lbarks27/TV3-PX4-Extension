@@ -1,0 +1,258 @@
+name: tv3_lander_v1
+description: TV3 three-engine splay-throttle landing vehicle for Gazebo validation.
+variant:
+  role: three_engine_lander
+  first_free_flight_gate: false
+gazebo:
+  model_name: tv3_lander
+  include_tv3_plugin: true
+  reference_thrust_n: 55.0
+  thrust_axis_frame: world
+  thrust_axis_world: [0.0, 0.0, 1.0]
+  apply_engine_torques: false
+  commanded_thrust: true
+  command_timeout_s: 0.25
+  command_scale: 0.07333333333333333
+  force_application_m: [0.72, 0.0, 0.0]
+  ignition_delay_s: 0.0
+  visual_model:
+    mode: cad_only
+    mesh_policy: omit_unavailable
+    notes:
+      - Vehicle structure is CAD-only; missing renderable meshes are omitted instead of replaced with primitives.
+      - Gazebo cannot render STEP directly; use GLB, GLTF, DAE, OBJ, or STL visual meshes.
+      - Keep animated nozzle meshes named engine_nozzle_0, engine_nozzle_1, and engine_nozzle_2.
+    orientation_axes:
+      enabled: true
+      length_m: 0.32
+      shaft_radius_m: 0.008
+      head_length_m: 0.07
+      head_radius_m: 0.024
+    joint_markers:
+      enabled: true
+      physical_joints: true
+      engine_pivots: true
+      radius_m: 0.022
+      axis_length_m: 0.16
+      axis_radius_m: 0.006
+    visuals:
+      - name: lander_static_structure
+        kind: mesh
+        mesh_uri: assets/cad/lander/tv3_lander_static_structure.glb
+        pose_m: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.78, 0.82, 0.80, 1.0]
+      - name: engine_nozzle_0
+        kind: mesh
+        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
+        pose_m: [0.12, 0.12, 0.0, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.06, 0.06, 0.07, 1.0]
+      - name: thrust_cue_0
+        kind: cylinder
+        pose_m: [0.12, 0.12, 0.0, 0.0, 0.0, 0.0]
+        radius_m: 0.016
+        length_m: 0.01
+        color_rgba: [1.0, 0.34, 0.02, 0.35]
+        cast_shadows: false
+      - name: engine_nozzle_1
+        kind: mesh
+        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
+        pose_m: [0.12, -0.06, 0.103923, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.06, 0.06, 0.07, 1.0]
+      - name: thrust_cue_1
+        kind: cylinder
+        pose_m: [0.12, -0.06, 0.103923, 0.0, 0.0, 0.0]
+        radius_m: 0.016
+        length_m: 0.01
+        color_rgba: [1.0, 0.34, 0.02, 0.35]
+        cast_shadows: false
+      - name: engine_nozzle_2
+        kind: mesh
+        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
+        pose_m: [0.12, -0.06, -0.103923, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.06, 0.06, 0.07, 1.0]
+      - name: thrust_cue_2
+        kind: cylinder
+        pose_m: [0.12, -0.06, -0.103923, 0.0, 0.0, 0.0]
+        radius_m: 0.016
+        length_m: 0.01
+        color_rgba: [1.0, 0.34, 0.02, 0.35]
+        cast_shadows: false
+hardware:
+  autopilot: cube_orange_plus
+  carrier: mini_carrier
+  telemetry: rfd900
+  gps:
+    rover: here4_rtk
+    base: here4_rtk_base
+  ignition_output_function: 450
+  tvc_pitch_output_function: 201
+  tvc_yaw_output_function: 202
+  load_cell:
+    driver: ads1115
+    source: 1
+    adc_channel: 0
+    calibration:
+      tare: 0.0
+      scale: 1.0
+    alpha: 0.25
+    timeout_ms: 200
+vehicle:
+  body_mass_kg: 1.6
+  body_com_x_m: 0.72
+  motor_com_x_m: 0.12
+  motor_loaded_mass_kg: 0.75
+  motor_dry_mass_kg: 0.28
+  rail_length_m: 3.5
+  tvc_max_deg: 35.0
+  tvc_slew_dps: 220.0
+  ca_reference_thrust_n: 750.0
+  ca_minimum_thrust_n: 45.0
+  ca_fallback_thrust_n: 180.0
+  torque_limits_nm:
+    roll: 8.0
+    pitch: 16.0
+    yaw: 16.0
+physical_model:
+  status: schema_placeholder
+  reference_frame:
+    origin: nozzle_exit_center
+    x_axis: forward_along_airframe
+    y_axis: vehicle_right
+    z_axis: vehicle_down
+  notes:
+    - Replace masses, COMs, inertia tensors, engine positions, and TVC axes with measured vehicle data before flight.
+    - Large-angle splay is the throttle mechanism; actuator limits must be measured before hover tests.
+  links:
+    - id: body
+      parent: model
+      mass_kg: 3.85
+      pose_m: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      com_m: [0.72, 0.0, 0.0]
+      inertia_kg_m2:
+        ixx: 0.43
+        iyy: 0.43
+        izz: 0.05
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+propulsion:
+  engine_count: 3
+  ignition:
+    mode: load_cell_confirmed_sequence
+    sequence: [0, 1, 2]
+    dwell_ms: 150
+    timeout_ms: 2000
+    confirmation_threshold_n: 10.0
+  throttle:
+    mechanism: splay_cosine_loss
+    max_splay_deg: 35.0
+  engines:
+    - id: engine_0
+      motor_index: 0
+      ignition_output_function: 450
+      load_cell_channel: 0
+      position_m: [0.12, 0.12, 0.0]
+      thrust_axis: [1.0, 0.0, 0.0]
+      pitch_axis: [0.0, -1.0, 0.0]
+      yaw_axis: [0.0, 0.0, -1.0]
+      thrust_fraction: 0.333333
+      gimbal:
+        pitch_max_deg: 35.0
+        yaw_max_deg: 35.0
+        splay_max_deg: 35.0
+        slew_dps: 220.0
+        pitch_trim: 0.0
+        yaw_trim: 0.0
+    - id: engine_1
+      motor_index: 1
+      ignition_output_function: 451
+      load_cell_channel: 1
+      position_m: [0.12, -0.06, 0.103923]
+      thrust_axis: [1.0, 0.0, 0.0]
+      pitch_axis: [0.0, -1.0, 0.0]
+      yaw_axis: [0.0, 0.0, -1.0]
+      thrust_fraction: 0.333333
+      gimbal:
+        pitch_max_deg: 35.0
+        yaw_max_deg: 35.0
+        splay_max_deg: 35.0
+        slew_dps: 220.0
+        pitch_trim: 0.0
+        yaw_trim: 0.0
+    - id: engine_2
+      motor_index: 2
+      ignition_output_function: 452
+      load_cell_channel: 2
+      position_m: [0.12, -0.06, -0.103923]
+      thrust_axis: [1.0, 0.0, 0.0]
+      pitch_axis: [0.0, -1.0, 0.0]
+      yaw_axis: [0.0, 0.0, -1.0]
+      thrust_fraction: 0.333334
+      gimbal:
+        pitch_max_deg: 35.0
+        yaw_max_deg: 35.0
+        splay_max_deg: 35.0
+        slew_dps: 220.0
+        pitch_trim: 0.0
+        yaw_trim: 0.0
+controller:
+  attitude_p:
+    rail: 2.0
+    free: 3.0
+  rate_p:
+    rail: 0.35
+    free: 0.5
+  rate_i: 0.04
+  rate_d: 0.003
+state_machine:
+  command_source: 1
+  ignition_pulse_ms: 300
+  ignition_timeout_ms: 2000
+  launch_threshold_n: 10.0
+  burnout_threshold_n: 4.0
+  burnout_dwell_ms: 100
+  minimum_burn_ms: 150
+  maximum_burn_ms: 15000
+  abort_on_gcs_loss: 0
+motor_selection:
+  index: 0
+  catalog_root: /fs/microsd/tv3/motors
+guidance:
+  enable: 1
+  takeoff_alt_m: 10.0
+  apex_alt_m: 45.0
+  pos_p: 0.15
+  vel_max_m_s: 12.0
+  vel_up_m_s: 8.0
+  vel_dn_m_s: 4.0
+  yaw_deg: 0.0
+  hold_alt_m: 5.0
+  acceptance_m: 15.0
+  min_twr: 1.05
+  landing_twr: 1.15
+  min_remaining_impulse_ns: 0.0
+  wp1_n_m: 20.0
+  wp1_e_m: 0.0
+  wp1_d_m: -15.0
+  wp2_n_m: 35.0
+  wp2_e_m: 10.0
+  wp2_d_m: -20.0
+  wp3_n_m: 15.0
+  wp3_e_m: 0.0
+  wp3_d_m: -12.0
+  land_n_m: 0.0
+  land_e_m: 0.0
+  land_d_m: 0.0
+  sim_groundtruth_fallback: 1
+mission_profile:
+  first_free_flight_gate: single_engine_ascent
+  required_sim_gates:
+    - gazebo_force_response
+    - load_cell_confirmed_sequence
+    - hover_window
+    - waypoint_track
+    - landing_approach

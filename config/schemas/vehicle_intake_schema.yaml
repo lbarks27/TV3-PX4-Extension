@@ -1,0 +1,64 @@
+schema: tv3_vehicle_intake_v1
+description: >
+  Measured-data intake contract for TV3 vehicle manifests. These fields are
+  intentionally explicit so physical parameters can be refreshed from measured
+  tables before they are trusted by PX4, Gazebo, or bench procedures.
+required_sections:
+  - vehicle
+  - hardware
+  - propulsion
+  - controller
+  - state_machine
+  - guidance
+vehicle:
+  summary: measured mass, CG, inertia, rail, and torque-limit data
+  required:
+    - dry/body mass excluding burnable propellant
+    - body center of mass in the vehicle reference frame
+    - inertia tensor about the declared reference origin
+    - rail length
+    - torque limits
+hardware:
+  required:
+    - autopilot and carrier board
+    - ignition outputs per engine
+    - load-cell ADC source, channel, tare, scale, filter alpha, and timeout per engine
+    - TVC output functions or actuator mapping per engine
+propulsion:
+  required:
+    - engine count, up to four
+    - engine id, motor index, mount position, nominal thrust axis, pitch axis, yaw axis
+    - motor loaded mass, dry mass, COM, and vendor thrust/mass curve reference
+    - ignition sequence and dwell/timeout policy
+    - splay/cosine-loss throttle mechanism, max angle, and slew rate
+    - per-engine thrust fraction for aggregate compatibility
+physical_model:
+  required:
+    - kinematic tree of fixed and moving links
+    - local poses, COMs, masses, inertia tensors, and parent joints
+    - moving TVC joint axes, limits, effort, velocity, damping, and friction
+gazebo:
+  optional:
+    - visual_model for visual-only SDF primitives, renderable mesh hooks, or CAD-only visual meshes
+    - visual_model mesh_policy may be fallback, omit_unavailable, or require_renderable
+    - visual_model orientation_axes may enable COM-pinned body-frame X/Y/Z arrow aids
+    - visual_model joint_markers may enable visual markers for physical_model joints and engine pivots
+    - visual_model entries must not add mass, collisions, or physics joints
+mission_profile:
+  required:
+    - first allowed free-flight gate
+    - sim scenarios to pass before flight
+    - waypoint and landing acceptance criteria
+guidance:
+  required:
+    - explicit enable flag
+    - launch, waypoint, hover, and landing targets
+    - minimum thrust-to-weight ratios for powered guidance and landing
+    - minimum remaining impulse or delta-v acceptance before claiming a solution
+defaults:
+  max_engines: 4
+  reference_frame:
+    origin: nozzle_exit_center
+    x_axis: forward_along_airframe
+    y_axis: vehicle_right
+    z_axis: vehicle_down

@@ -1,5 +1,48 @@
 name: tv3_v1
-description: TV3 single-motor TVC rocket baseline for PX4 v1.
+description: Swerve Vector Control single-motor TVC rocket baseline for PX4 v1.
+gazebo:
+  model_name: tv3_rocket
+  include_tv3_plugin: false
+  visual_model:
+    mode: cad_only
+    mesh_policy: omit_unavailable
+    notes:
+      - Vehicle structure is CAD-only; missing renderable meshes are omitted instead of replaced with primitives.
+      - Gazebo cannot render STEP directly; use GLB, GLTF, DAE, OBJ, or STL visual meshes.
+      - Keep the animated TVC/nozzle mesh named engine_nozzle_0 for future command-driven visualization.
+    orientation_axes:
+      enabled: true
+      length_m: 0.38
+      shaft_radius_m: 0.008
+      head_length_m: 0.08
+      head_radius_m: 0.025
+    joint_markers:
+      enabled: true
+      physical_joints: true
+      engine_pivots: false
+      radius_m: 0.024
+      axis_length_m: 0.18
+      axis_radius_m: 0.006
+    visuals:
+      - name: tv3_static_structure
+        kind: mesh
+        mesh_uri: assets/cad/tv3_v1/tv3_v1_static_structure.glb
+        pose_m: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.82, 0.84, 0.82, 1.0]
+      - name: engine_nozzle_0
+        kind: mesh
+        mesh_uri: assets/cad/tv3_v1/tv3_v1_engine_nozzle.glb
+        pose_m: [0.02, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mesh_scale: [1.0, 1.0, 1.0]
+        color_rgba: [0.08, 0.08, 0.09, 1.0]
+      - name: thrust_cue_0
+        kind: cylinder
+        pose_m: [0.15, 0.0, 0.0, 0.0, 0.0, 0.0]
+        radius_m: 0.018
+        length_m: 0.01
+        color_rgba: [1.0, 0.34, 0.02, 0.35]
+        cast_shadows: false
 hardware:
   autopilot: cube_orange_plus
   carrier: mini_carrier
@@ -20,7 +63,7 @@ hardware:
     alpha: 0.25
     timeout_ms: 200
 vehicle:
-  body_mass_kg: 6.5
+  body_mass_kg: 1.0
   body_com_x_m: 0.95
   motor_com_x_m: 0.15
   motor_loaded_mass_kg: 0.75
@@ -34,6 +77,105 @@ vehicle:
   torque_limits_nm:
     pitch: 10.0
     yaw: 10.0
+physical_model:
+  status: preliminary
+  reference_frame:
+    origin: nozzle_exit_center
+    x_axis: forward_along_airframe
+    y_axis: vehicle_right
+    z_axis: vehicle_down
+  notes:
+    - TVC CAD and inertias are provisional until measured mating frames, COM offsets, and joint axes are captured.
+    - Base vehicle mass/inertia excludes the swerve axis and thrust joint moving links.
+    - STEP sources are copied into generated Gazebo assets as CAD references; convert to mesh formats before visual rendering.
+  assemblies:
+    - id: base_vehicle_without_tvc_moving_links
+      total_mass_kg: 1.0
+      inertia_about_origin_kg_m2:
+        ixx: 0.14435
+        iyy: 0.14435
+        izz: 0.01
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+    - id: preliminary_total_with_tvc_moving_links
+      total_mass_kg: 1.4
+      inertia_about_origin_kg_m2:
+        ixx: 0.14455
+        iyy: 0.14455
+        izz: 0.0102
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+  links:
+    - id: body
+      description: Base vehicle/fixed portion of Swerve Vector Control v4 assembly, excluding moving TVC links.
+      parent: model
+      mass_kg: 1.0
+      pose_m: [0.0, 0.0, 0.0]
+      com_m: [0.0, 0.0, 0.0]
+      inertia_kg_m2:
+        ixx: 0.14435
+        iyy: 0.14435
+        izz: 0.01
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+      cad:
+        source_step: assets/cad/tvc/swerve_vector_control_v4.step
+    - id: swerve_axis
+      description: First moving TVC axis placeholder.
+      parent: body
+      mass_kg: 0.2
+      pose_m: [0.0, 0.0, 0.0]
+      com_m: [0.0, 0.0, 0.0]
+      inertia_kg_m2:
+        ixx: 0.0001
+        iyy: 0.0001
+        izz: 0.0001
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+      cad:
+        source_step: assets/cad/tvc/swerve_axis_v2.step
+    - id: thrust_joint
+      description: Second moving TVC/thrust joint placeholder.
+      parent: swerve_axis
+      mass_kg: 0.2
+      pose_m: [0.0, 0.0, 0.0]
+      com_m: [0.0, 0.0, 0.0]
+      inertia_kg_m2:
+        ixx: 0.0001
+        iyy: 0.0001
+        izz: 0.0001
+        ixy: 0.0
+        ixz: 0.0
+        iyz: 0.0
+      cad:
+        source_step: assets/cad/tvc/thrust_joint_v5.step
+  joints:
+    - id: tvc_pitch_axis
+      type: revolute
+      parent: body
+      child: swerve_axis
+      origin_m: [0.0, 0.0, 0.0]
+      axis: [0.0, 1.0, 0.0]
+      limit_rad: [-0.0872665, 0.0872665]
+      effort_nm: 2.0
+      velocity_rad_s: 4.363323
+      damping: 0.0
+      friction: 0.0
+    - id: tvc_yaw_axis
+      type: revolute
+      parent: swerve_axis
+      child: thrust_joint
+      origin_m: [0.0, 0.0, 0.0]
+      axis: [0.0, 0.0, 1.0]
+      limit_rad: [-0.0872665, 0.0872665]
+      effort_nm: 2.0
+      velocity_rad_s: 4.363323
+      damping: 0.0
+      friction: 0.0
 controller:
   attitude_p:
     rail: 2.0
@@ -52,11 +194,12 @@ state_machine:
   burnout_dwell_ms: 100
   minimum_burn_ms: 150
   maximum_burn_ms: 6000
+  abort_on_gcs_loss: 0
 motor_selection:
   index: 0
   catalog_root: /fs/microsd/tv3/motors
 guidance:
-  enable: 1
+  enable: 0
   takeoff_alt_m: 35.0
   apex_alt_m: 120.0
   pos_p: 0.15
@@ -66,6 +209,9 @@ guidance:
   yaw_deg: 0.0
   hold_alt_m: 5.0
   acceptance_m: 15.0
+  min_twr: 1.05
+  landing_twr: 1.15
+  min_remaining_impulse_ns: 0.0
   wp1_n_m: 60.0
   wp1_e_m: 0.0
   wp1_d_m: -60.0

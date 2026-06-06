@@ -1,0 +1,59 @@
+schema: tv3_flight_profile_v1
+name: single_engine_ascent
+description: Default single-engine TVC ascent gate for tv3_v1.
+vehicle: tv3_v1
+scenario:
+  type: ascent
+  simulator: gz
+  intent: Prove rail departure, TVC response, burnout detection, coast, and log review for the first free-flight vehicle.
+  first_free_flight_gate: true
+guidance:
+  enable: 0
+  takeoff_alt_m: 35.0
+  apex_alt_m: 120.0
+  pos_p: 0.15
+  vel_max_m_s: 30.0
+  vel_up_m_s: 15.0
+  vel_dn_m_s: 8.0
+  yaw_deg: 0.0
+  hold_alt_m: 5.0
+  acceptance_m: 15.0
+  min_twr: 1.05
+  landing_twr: 1.15
+  min_remaining_impulse_ns: 0.0
+  wp1_n_m: 60.0
+  wp1_e_m: 0.0
+  wp1_d_m: -60.0
+  wp2_n_m: 150.0
+  wp2_e_m: 30.0
+  wp2_d_m: -90.0
+  wp3_n_m: 220.0
+  wp3_e_m: 80.0
+  wp3_d_m: -75.0
+  land_n_m: 0.0
+  land_e_m: 0.0
+  land_d_m: 0.0
+mission_profile:
+  first_free_flight_gate: single_engine_ascent
+  required_sim_gates:
+    - rail_departure
+    - tvc_response
+    - burnout_coast
+    - abort_reset_command
+commands:
+  - at_s: 0.0
+    action: arm_and_ready
+  - at_s: 1.0
+    action: launch
+review:
+  required_topics:
+    - rocket_status
+    - rocket_mode_status
+    - rocket_thrust
+    - actuator_servos
+    - vehicle_attitude
+    - vehicle_local_position
+  success_criteria:
+    - rail exit detected before burnout
+    - no guidance module start for this profile
+    - launch, burnout, and post-burn coast are visible in ULog

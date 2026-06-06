@@ -1,0 +1,56 @@
+schema: tv3_flight_profile_v1
+name: lander_ignition_sequence
+description: Three-engine ignition and load-cell confirmation smoke scenario.
+vehicle: tv3_lander_v1
+scenario:
+  type: ignition_sequence
+  simulator: gz
+  intent: Prove ordered engine ignition, dwell timing, and confirmed thrust before hover or waypoint demands.
+  simulated_only: true
+guidance:
+  enable: 1
+  takeoff_alt_m: 6.0
+  apex_alt_m: 12.0
+  pos_p: 0.12
+  vel_max_m_s: 6.0
+  vel_up_m_s: 4.0
+  vel_dn_m_s: 3.0
+  yaw_deg: 0.0
+  hold_alt_m: 4.0
+  acceptance_m: 5.0
+  min_twr: 1.05
+  landing_twr: 1.15
+  min_remaining_impulse_ns: 0.0
+  wp1_n_m: 0.0
+  wp1_e_m: 0.0
+  wp1_d_m: -6.0
+  wp2_n_m: 0.0
+  wp2_e_m: 0.0
+  wp2_d_m: -8.0
+  wp3_n_m: 0.0
+  wp3_e_m: 0.0
+  wp3_d_m: -6.0
+  land_n_m: 0.0
+  land_e_m: 0.0
+  land_d_m: 0.0
+mission_profile:
+  first_free_flight_gate: single_engine_ascent
+  required_sim_gates:
+    - gazebo_force_response
+    - load_cell_confirmed_sequence
+commands:
+  - at_s: 0.0
+    action: arm_and_ready
+  - at_s: 1.0
+    action: launch
+review:
+  required_topics:
+    - rocket_engine_command
+    - rocket_engine_state
+    - rocket_load_cell
+    - rocket_thrust
+    - rocket_mode_status
+  success_criteria:
+    - engine ignition order matches the manifest sequence
+    - no engine advances without load-cell confirmation
+    - timeout or stale load-cell state produces a visible no-go or abort

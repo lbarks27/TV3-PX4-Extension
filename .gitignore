@@ -1,8 +1,10 @@
 .work/
 vendor/
-runtime/nuttx/fs/microsd/
+runtime/nuttx/fs/
 build/
 dist/
+.vscode/
+build_sitl.log
 __pycache__/
 .pytest_cache/
 *.pyc

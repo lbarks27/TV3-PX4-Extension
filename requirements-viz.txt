@@ -1,0 +1,2 @@
+matplotlib>=3.8
+pyulog>=1.2.2

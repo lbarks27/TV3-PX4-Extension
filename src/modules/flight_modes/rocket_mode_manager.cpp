@@ -12,6 +12,8 @@
 #include <uORB/topics/internal_combustion_engine_control.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/rocket_command.h>
+#include <uORB/topics/rocket_engine_command.h>
+#include <uORB/topics/rocket_engine_state.h>
 #include <uORB/topics/rocket_mode_status.h>
 #include <uORB/topics/rocket_status.h>
 #include <uORB/topics/rocket_thrust.h>
@@ -19,15 +21,23 @@
 #include <uORB/topics/vehicle_command_ack.h>
 #include <uORB/topics/vehicle_status.h>
 
+#include <stdio.h>
+
 using namespace time_literals;
 
 namespace
 {
 constexpr uint32_t kRocketVehicleCommand = 31010;
+constexpr int kMaxEngines = 4;
 
 static void copy_motor_id(char (&dst)[32], const char (&src)[32])
 {
 	memcpy(dst, src, sizeof(dst));
+}
+
+static uint8_t engine_bit(int engine_index)
+{
+	return engine_index >= 0 && engine_index < 8 ? static_cast<uint8_t>(1u << engine_index) : 0;
 }
 }
 
@@ -81,13 +91,15 @@ public:
 			return print_usage("unknown command");
 		}
 
-		uORB::Publication<rocket_command_s> pub{ORB_ID(rocket_command)};
-		rocket_command_s msg{};
-		msg.timestamp = hrt_absolute_time();
-		msg.command = command;
-		msg.source = rocket_command_s::SOURCE_SCRIPT;
-		msg.sequence = static_cast<uint32_t>(msg.timestamp & 0xffffffff);
-		pub.publish(msg);
+		RocketModeManager *instance = get_instance();
+
+		if (instance == nullptr) {
+			PX4_WARN("not running");
+			return PX4_ERROR;
+		}
+
+		instance->publish_rocket_command(command, rocket_command_s::SOURCE_SCRIPT);
+		instance->handle_rocket_command(command);
 		return PX4_OK;
 	}
 
@@ -137,6 +149,7 @@ private:
 
 		_vehicle_status_sub.update(&_vehicle_status);
 		_rocket_thrust_sub.update(&_thrust);
+		_rocket_engine_state_sub.update(&_engine_state);
 
 		process_commands();
 		update_state(now);
@@ -159,6 +172,16 @@ private:
 				publish_ack(vehicle_cmd, vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED);
 			}
 		}
+	}
+
+	void publish_rocket_command(uint8_t command, uint8_t source)
+	{
+		rocket_command_s msg{};
+		msg.timestamp = hrt_absolute_time();
+		msg.command = command;
+		msg.source = source;
+		msg.sequence = static_cast<uint32_t>(msg.timestamp & 0xffffffff);
+		_command_pub.publish(msg);
 	}
 
 	void handle_rocket_command(uint8_t command)
@@ -240,14 +263,36 @@ private:
 			param_get(p, &_rail_length_m);
 		}
 
-		p = param_find("RK_ABORT_GCS");
-		if (p != PARAM_INVALID) {
-			param_get(p, &_abort_on_gcs_loss);
-		}
-	}
+			p = param_find("RK_ABORT_GCS");
+			if (p != PARAM_INVALID) {
+				param_get(p, &_abort_on_gcs_loss);
+			}
 
-	void reset_state()
-	{
+			p = param_find("RK_ENG_COUNT");
+			if (p != PARAM_INVALID) {
+				param_get(p, &_engine_count);
+				_engine_count = math::constrain(_engine_count, 1, kMaxEngines);
+			}
+
+			p = param_find("RK_IGN_DWELL_MS");
+			if (p != PARAM_INVALID) {
+				param_get(p, &_ignition_dwell_ms);
+				_ignition_dwell_ms = math::max(_ignition_dwell_ms, 0);
+			}
+
+			for (int i = 0; i < kMaxEngines; ++i) {
+				char name[16];
+				snprintf(name, sizeof(name), "RK_IGN_IDX%d", i);
+				p = param_find(name);
+				if (p != PARAM_INVALID) {
+					param_get(p, &_ignition_sequence[i]);
+					_ignition_sequence[i] = math::constrain(_ignition_sequence[i], 0, kMaxEngines - 1);
+				}
+			}
+		}
+
+		void reset_state()
+		{
 		_mode = rocket_status_s::MODE_DISARMED_SAFE;
 		_fault_reason = rocket_status_s::FAULT_NONE;
 		_ignition_on = false;
@@ -256,19 +301,88 @@ private:
 		_reset_requested = false;
 		_ignition_timestamp = 0;
 		_boost_timestamp = 0;
-		_burnout_low_timestamp = 0;
-		_rail_exit = false;
-		_rail_distance_m = 0.f;
-		_rail_velocity_m_s = 0.f;
-		_last_update = 0;
-	}
+			_burnout_low_timestamp = 0;
+			_rail_exit = false;
+			_rail_distance_m = 0.f;
+			_rail_velocity_m_s = 0.f;
+			reset_engine_sequence();
+			_last_update = 0;
+		}
 
-	void set_fault(uint32_t fault_reason)
-	{
-		_fault_reason = fault_reason;
-		_mode = rocket_status_s::MODE_ABORT;
-		_ignition_on = false;
-	}
+		void set_fault(uint32_t fault_reason)
+		{
+			_fault_reason = fault_reason;
+			_mode = rocket_status_s::MODE_ABORT;
+			_ignition_on = false;
+			_ignition_mask = 0;
+		}
+
+		void reset_engine_sequence()
+		{
+			_ignition_mask = 0;
+			_active_sequence_slot = 0;
+			_current_engine_confirm_timestamp = 0;
+			_sequence_complete = false;
+		}
+
+		void start_engine_sequence(hrt_abstime now)
+		{
+			_active_sequence_slot = 0;
+			_current_engine_confirm_timestamp = 0;
+			_sequence_complete = false;
+			_ignition_mask = engine_bit(_ignition_sequence[0]);
+			_ignition_timestamp = now;
+		}
+
+		bool active_sequence_engine_confirmed() const
+		{
+			if (_engine_count <= 1 || _engine_state.engine_count == 0) {
+				return _thrust.ignition_confirmed;
+			}
+
+			const int engine = _ignition_sequence[_active_sequence_slot];
+			return (_engine_state.confirmed_mask & engine_bit(engine)) != 0;
+		}
+
+		bool all_sequence_engines_confirmed() const
+		{
+			if (_engine_count <= 1) {
+				return _thrust.ignition_confirmed;
+			}
+
+			uint8_t required_mask = 0;
+			for (int i = 0; i < _engine_count; ++i) {
+				required_mask |= engine_bit(_ignition_sequence[i]);
+			}
+
+			return required_mask != 0 && (_engine_state.confirmed_mask & required_mask) == required_mask;
+		}
+
+		void update_engine_sequence(hrt_abstime now)
+		{
+			if (_engine_count <= 1) {
+				_sequence_complete = _thrust.ignition_confirmed;
+				return;
+			}
+
+			if (active_sequence_engine_confirmed()) {
+				if (_current_engine_confirm_timestamp == 0) {
+					_current_engine_confirm_timestamp = now;
+				}
+
+				if (_active_sequence_slot + 1 < _engine_count
+				    && hrt_elapsed_time(&_current_engine_confirm_timestamp) >= static_cast<hrt_abstime>(_ignition_dwell_ms) * 1000ULL) {
+					++_active_sequence_slot;
+					_ignition_mask |= engine_bit(_ignition_sequence[_active_sequence_slot]);
+					_current_engine_confirm_timestamp = 0;
+					_ignition_timestamp = now;
+				}
+			} else {
+				_current_engine_confirm_timestamp = 0;
+			}
+
+			_sequence_complete = all_sequence_engines_confirmed();
+		}
 
 	void update_state(hrt_abstime now)
 	{
@@ -288,20 +402,21 @@ private:
 		const bool ignition_confirmed = _thrust.ignition_confirmed;
 		const bool gcs_ok = !_vehicle_status.gcs_connection_lost;
 
-		if (_reset_requested) {
-			_mode = rocket_status_s::MODE_READY;
-			_fault_reason = rocket_status_s::FAULT_NONE;
-			_ignition_on = false;
+			if (_reset_requested) {
+				_mode = rocket_status_s::MODE_READY;
+				_fault_reason = rocket_status_s::FAULT_NONE;
+				_ignition_on = false;
 			_reset_requested = false;
 			_abort_requested = false;
 			_launch_requested = false;
 			_ignition_timestamp = 0;
 			_boost_timestamp = 0;
-			_burnout_low_timestamp = 0;
-			_rail_exit = false;
-			_rail_distance_m = 0.f;
-			_rail_velocity_m_s = 0.f;
-		}
+				_burnout_low_timestamp = 0;
+				_rail_exit = false;
+				_rail_distance_m = 0.f;
+				_rail_velocity_m_s = 0.f;
+				reset_engine_sequence();
+			}
 
 		if (_abort_requested) {
 			set_fault(rocket_status_s::FAULT_COMMAND_ABORT);
@@ -318,29 +433,33 @@ private:
 			_mode = rocket_status_s::MODE_READY;
 		}
 
-		if (_mode == rocket_status_s::MODE_READY && _launch_requested) {
-			_mode = rocket_status_s::MODE_IGNITION_PENDING;
-			_ignition_on = true;
-			_ignition_timestamp = now;
-			_launch_requested = false;
-			_last_update = now;
-		}
+			if (_mode == rocket_status_s::MODE_READY && _launch_requested) {
+				_mode = rocket_status_s::MODE_IGNITION_PENDING;
+				_ignition_on = true;
+				start_engine_sequence(now);
+				_launch_requested = false;
+				_last_update = now;
+			}
 
 		if (_abort_on_gcs_loss > 0 && !gcs_ok
 		    && (_mode == rocket_status_s::MODE_IGNITION_PENDING || _mode == rocket_status_s::MODE_BOOST)) {
 			set_fault(rocket_status_s::FAULT_GCS_LOSS);
 		}
 
-		if (_mode == rocket_status_s::MODE_IGNITION_PENDING) {
-			if (!thrust_valid && _ignition_timestamp != 0
-			    && hrt_elapsed_time(&_ignition_timestamp) > static_cast<hrt_abstime>(_ignition_timeout_ms) * 1000ULL) {
-				set_fault(rocket_status_s::FAULT_IGNITION_TIMEOUT);
-			}
+			if (_mode == rocket_status_s::MODE_IGNITION_PENDING) {
+				update_engine_sequence(now);
 
-			if (ignition_confirmed) {
-				_mode = rocket_status_s::MODE_BOOST;
-				_boost_timestamp = now;
-				_last_update = now;
+				if (!active_sequence_engine_confirmed() && _ignition_timestamp != 0
+				    && hrt_elapsed_time(&_ignition_timestamp) > static_cast<hrt_abstime>(_ignition_timeout_ms) * 1000ULL) {
+					set_fault(rocket_status_s::FAULT_IGNITION_TIMEOUT);
+				}
+
+				const bool ignition_sequence_complete = _engine_count > 1 ? _sequence_complete : ignition_confirmed;
+
+				if (ignition_sequence_complete) {
+					_mode = rocket_status_s::MODE_BOOST;
+					_boost_timestamp = now;
+					_last_update = now;
 			}
 		}
 
@@ -381,22 +500,33 @@ private:
 			}
 		}
 
-		if (_mode == rocket_status_s::MODE_COAST) {
-			_ignition_on = false;
-		}
+			if (_mode == rocket_status_s::MODE_COAST) {
+				_ignition_on = false;
+				_ignition_mask = 0;
+			}
 
-		if (_mode == rocket_status_s::MODE_ABORT) {
-			_ignition_on = false;
+			if (_mode == rocket_status_s::MODE_ABORT) {
+				_ignition_on = false;
+				_ignition_mask = 0;
+			}
 		}
-	}
 
 	void publish_outputs(hrt_abstime now)
 	{
 		internal_combustion_engine_control_s engine{};
 		engine.timestamp = now;
-		engine.ignition_on = _ignition_on;
-		engine.throttle_control = _ignition_on ? 1.f : 0.f;
-		_engine_pub.publish(engine);
+			engine.ignition_on = _ignition_on;
+			engine.throttle_control = _ignition_on ? 1.f : 0.f;
+			_engine_pub.publish(engine);
+
+			rocket_engine_command_s engine_command{};
+			engine_command.timestamp = now;
+			engine_command.engine_count = static_cast<uint8_t>(_engine_count);
+			engine_command.ignition_mask = _ignition_mask;
+			engine_command.active_ignition_index = static_cast<uint8_t>(_ignition_sequence[_active_sequence_slot]);
+			engine_command.sequence_active = _mode == rocket_status_s::MODE_IGNITION_PENDING || _mode == rocket_status_s::MODE_BOOST;
+			engine_command.sequence_complete = _sequence_complete;
+			_engine_command_pub.publish(engine_command);
 
 		rocket_status_s status{};
 		status.timestamp = now;
@@ -474,33 +604,44 @@ private:
 	float _burnout_threshold_n{4.f};
 	int32_t _burnout_dwell_ms{100};
 	float _rail_length_m{3.5f};
-	int32_t _abort_on_gcs_loss{0};
+		int32_t _abort_on_gcs_loss{0};
+		int32_t _engine_count{1};
+		int32_t _ignition_sequence[kMaxEngines]{0, 1, 2, 3};
+		int32_t _ignition_dwell_ms{0};
 
-	uint8_t _mode{rocket_status_s::MODE_DISARMED_SAFE};
-	uint32_t _fault_reason{rocket_status_s::FAULT_NONE};
+		uint8_t _mode{rocket_status_s::MODE_DISARMED_SAFE};
+		uint32_t _fault_reason{rocket_status_s::FAULT_NONE};
 	bool _launch_requested{false};
 	bool _abort_requested{false};
 	bool _reset_requested{false};
-	bool _ignition_on{false};
-	bool _rail_exit{false};
+		bool _ignition_on{false};
+		bool _sequence_complete{false};
+		uint8_t _ignition_mask{0};
+		int _active_sequence_slot{0};
+		bool _rail_exit{false};
 	float _rail_distance_m{0.f};
 	float _rail_velocity_m_s{0.f};
-	hrt_abstime _ignition_timestamp{0};
-	hrt_abstime _boost_timestamp{0};
-	hrt_abstime _burnout_low_timestamp{0};
-	hrt_abstime _last_update{0};
+		hrt_abstime _ignition_timestamp{0};
+		hrt_abstime _boost_timestamp{0};
+		hrt_abstime _burnout_low_timestamp{0};
+		hrt_abstime _current_engine_confirm_timestamp{0};
+		hrt_abstime _last_update{0};
 
-	vehicle_status_s _vehicle_status{};
-	rocket_thrust_s _thrust{};
+		vehicle_status_s _vehicle_status{};
+		rocket_thrust_s _thrust{};
+		rocket_engine_state_s _engine_state{};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
-	uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
-	uORB::Subscription _rocket_command_sub{ORB_ID(rocket_command)};
-	uORB::Subscription _rocket_thrust_sub{ORB_ID(rocket_thrust)};
+		uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
+		uORB::Subscription _rocket_command_sub{ORB_ID(rocket_command)};
+		uORB::Subscription _rocket_thrust_sub{ORB_ID(rocket_thrust)};
+		uORB::Subscription _rocket_engine_state_sub{ORB_ID(rocket_engine_state)};
 
-	uORB::Publication<internal_combustion_engine_control_s> _engine_pub{ORB_ID(internal_combustion_engine_control)};
-	uORB::Publication<rocket_status_s> _status_pub{ORB_ID(rocket_status)};
+		uORB::Publication<rocket_command_s> _command_pub{ORB_ID(rocket_command)};
+		uORB::Publication<internal_combustion_engine_control_s> _engine_pub{ORB_ID(internal_combustion_engine_control)};
+		uORB::Publication<rocket_engine_command_s> _engine_command_pub{ORB_ID(rocket_engine_command)};
+		uORB::Publication<rocket_status_s> _status_pub{ORB_ID(rocket_status)};
 	uORB::Publication<rocket_mode_status_s> _compat_status_pub{ORB_ID(rocket_mode_status)};
 	uORB::Publication<vehicle_command_ack_s> _ack_pub{ORB_ID(vehicle_command_ack)};
 };

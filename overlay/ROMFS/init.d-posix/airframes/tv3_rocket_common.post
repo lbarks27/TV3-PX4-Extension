@@ -1,7 +1,5 @@
 control_allocator start
-internal_combustion_engine_control start
 rocket_motor_model start
 rocket_load_cell start
 rocket_mode_manager start
-rocket_guidance start
 rocket_att_control start

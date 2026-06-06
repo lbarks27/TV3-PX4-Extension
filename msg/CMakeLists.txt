@@ -3,6 +3,8 @@ set(config_msg_list_external
 	RocketStatus.msg
 	RocketThrust.msg
 	RocketMotorReference.msg
+	RocketEngineCommand.msg
+	RocketEngineState.msg
 	RocketModeStatus.msg
 	RocketGuidanceStatus.msg
 	RocketLoadCell.msg

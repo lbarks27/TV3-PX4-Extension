@@ -10,6 +10,7 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/adc_report.h>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/rocket_engine_state.h>
 #include <uORB/topics/rocket_load_cell.h>
 #include <uORB/topics/rocket_motor_reference.h>
 #include <uORB/topics/rocket_thrust.h>
@@ -80,6 +81,7 @@ public:
 private:
 	static constexpr int32_t SOURCE_ADC = 0;
 	static constexpr int32_t SOURCE_REFERENCE = 1;
+	static constexpr int kMaxEngines = 4;
 
 	void Run() override
 	{
@@ -102,10 +104,10 @@ private:
 
 		uint8_t fault_flags = rocket_thrust_s::FAULT_NONE;
 
-		if (_source == SOURCE_REFERENCE) {
-			_measured_thrust_n = _reference.expected_thrust_n;
-			_last_sample_timestamp = hrt_absolute_time();
-			_last_raw = static_cast<int32_t>(lrintf(_measured_thrust_n * 100.f));
+			if (_source == SOURCE_REFERENCE) {
+				_measured_thrust_n = _reference.expected_thrust_n;
+				_last_sample_timestamp = hrt_absolute_time();
+				_last_raw = static_cast<int32_t>(lrintf(_measured_thrust_n * 100.f));
 			_last_voltage_v = _measured_thrust_n;
 
 		} else {
@@ -144,10 +146,11 @@ private:
 			fault_flags |= rocket_thrust_s::FAULT_STALE;
 		}
 
-		_filtered_thrust_n = _alpha * _measured_thrust_n + (1.f - _alpha) * _filtered_thrust_n;
-		const bool ignition_confirmed = _filtered_thrust_n >= _ignition_threshold_n;
+			_filtered_thrust_n = _alpha * _measured_thrust_n + (1.f - _alpha) * _filtered_thrust_n;
+			update_engine_state_from_reference(fault_flags);
+			const bool ignition_confirmed = _engine_confirmed_mask != 0 || _filtered_thrust_n >= _ignition_threshold_n;
 
-		rocket_thrust_s out{};
+			rocket_thrust_s out{};
 		out.timestamp = hrt_absolute_time();
 		out.timestamp_sample = _last_sample_timestamp;
 		out.measured_thrust_n = _measured_thrust_n;
@@ -188,8 +191,62 @@ private:
 		}
 
 		compat.fault_flags = compat_faults;
-		_load_cell_pub.publish(compat);
-	}
+			_load_cell_pub.publish(compat);
+		}
+
+		void update_engine_state_from_reference(uint8_t aggregate_fault_flags)
+		{
+			const int engine_count = math::constrain(_reference.engine_count > 0 ? (int)_reference.engine_count : 1, 1, kMaxEngines);
+			float expected_sum = 0.f;
+
+			for (int i = 0; i < engine_count; ++i) {
+				const float expected = _reference.engine_count > 0 ? _reference.expected_thrust_n_engine[i] : _reference.expected_thrust_n;
+				expected_sum += math::max(expected, 0.f);
+			}
+
+			_engine_confirmed_mask = 0;
+			rocket_engine_state_s state{};
+			state.timestamp = hrt_absolute_time();
+			state.timestamp_sample = _last_sample_timestamp;
+			state.engine_count = static_cast<uint8_t>(engine_count);
+			state.ignition_mask = _reference.ignition_mask;
+			state.active_mask = _reference.active_mask;
+
+			for (int i = 0; i < engine_count; ++i) {
+				const float expected = _reference.engine_count > 0 ? _reference.expected_thrust_n_engine[i] : _reference.expected_thrust_n;
+
+				if (_source == SOURCE_REFERENCE) {
+					_engine_measured_thrust_n[i] = expected;
+				} else if (expected_sum > 1e-3f) {
+					_engine_measured_thrust_n[i] = _measured_thrust_n * math::max(expected, 0.f) / expected_sum;
+				} else {
+					_engine_measured_thrust_n[i] = i == 0 ? _measured_thrust_n : 0.f;
+				}
+
+				_engine_filtered_thrust_n[i] = _alpha * _engine_measured_thrust_n[i] + (1.f - _alpha) * _engine_filtered_thrust_n[i];
+
+				state.measured_thrust_n[i] = _engine_measured_thrust_n[i];
+				state.filtered_thrust_n[i] = _engine_filtered_thrust_n[i];
+				state.expected_thrust_n[i] = expected;
+				state.expected_motor_mass_kg[i] = _reference.engine_count > 0 ? _reference.expected_motor_mass_kg_engine[i]
+									: _reference.expected_motor_mass_kg;
+				state.burn_fraction[i] = _reference.engine_count > 0 ? _reference.burn_fraction_engine[i] : _reference.burn_fraction;
+				state.remaining_impulse_ns[i] = math::max(_reference.total_impulse_ns * (1.f - state.burn_fraction[i]), 0.f);
+				state.fault_flags[i] = aggregate_fault_flags;
+				state.selected_motor_index[i] = _reference.engine_count > 0 ? _reference.selected_motor_index_engine[i]
+										   : _reference.selected_motor_index;
+
+				if (_engine_filtered_thrust_n[i] >= _ignition_threshold_n) {
+					_engine_confirmed_mask |= static_cast<uint8_t>(1u << i);
+				}
+			}
+
+			state.confirmed_mask = _engine_confirmed_mask;
+			state.fault_mask = aggregate_fault_flags == rocket_thrust_s::FAULT_NONE ? 0 : ((1u << engine_count) - 1u);
+			state.sequence_complete = state.ignition_mask != 0 && (state.confirmed_mask & state.ignition_mask) == state.ignition_mask;
+			state.all_ignited = state.sequence_complete;
+			_engine_state_pub.publish(state);
+		}
 
 	void update_parameters()
 	{
@@ -242,16 +299,20 @@ private:
 	uint64_t _last_sample_timestamp{0};
 	int32_t _last_raw{0};
 	float _last_voltage_v{0.f};
-	float _measured_thrust_n{0.f};
-	float _filtered_thrust_n{0.f};
-	rocket_motor_reference_s _reference{};
+		float _measured_thrust_n{0.f};
+		float _filtered_thrust_n{0.f};
+		float _engine_measured_thrust_n[kMaxEngines]{};
+		float _engine_filtered_thrust_n[kMaxEngines]{};
+		uint8_t _engine_confirmed_mask{0};
+		rocket_motor_reference_s _reference{};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _adc_report_sub{ORB_ID(adc_report)};
-	uORB::Subscription _motor_reference_sub{ORB_ID(rocket_motor_reference)};
-	uORB::Publication<rocket_thrust_s> _thrust_pub{ORB_ID(rocket_thrust)};
-	uORB::Publication<rocket_load_cell_s> _load_cell_pub{ORB_ID(rocket_load_cell)};
-};
+		uORB::Subscription _motor_reference_sub{ORB_ID(rocket_motor_reference)};
+		uORB::Publication<rocket_thrust_s> _thrust_pub{ORB_ID(rocket_thrust)};
+		uORB::Publication<rocket_load_cell_s> _load_cell_pub{ORB_ID(rocket_load_cell)};
+		uORB::Publication<rocket_engine_state_s> _engine_state_pub{ORB_ID(rocket_engine_state)};
+	};
 
 extern "C" __EXPORT int rocket_load_cell_main(int argc, char *argv[])
 {

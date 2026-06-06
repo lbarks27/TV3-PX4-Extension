@@ -1,7 +1,9 @@
 # PX4 Patch Stack
 
-This directory carries the smallest upstream PX4 delta needed by the extension:
+This directory carries the core upstream PX4 delta needed by the extension:
 
-- `0001-rocket-control-allocation.patch`
+- `0001-rocket-control-allocation.patch` — supplies `ActuatorEffectivenessRocket`, the Rocket airframe type (16), related parameters, and control allocation wiring.
 
-The patch was imported from the earlier TV3 wrapper and is kept separate from the extension modules so the rocket-specific behavior remains out-of-tree. The current extension publishes both the new public topics (`rocket_status`, `rocket_thrust`) and compatibility aliases (`rocket_mode_status`, `rocket_load_cell`) so the allocator patch can continue to consume the older topic names until the patch is refreshed.
+The patch is applied during `scripts/prepare_px4_tree.sh`, which then performs additional integration steps (module.yaml edits, allocator registration, Gazebo plugin wiring, commander command passthrough, build flag adjustments, etc.) so the full rocket feature set works against the selected PX4 tag while keeping the majority of the behavior out-of-tree in this repo.
+
+The extension publishes the primary topics (`rocket_status`, `rocket_thrust`, `rocket_engine_*`, etc.) plus a few compatibility aliases for the allocator during the transition. The patch should be refreshed when rebasing to a newer PX4 baseline.

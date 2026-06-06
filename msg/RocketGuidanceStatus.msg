@@ -30,3 +30,10 @@ float32 down_track_error_m
 float32 commanded_speed_m_s
 float32 commanded_climb_rate_m_s
 float32 commanded_yaw_rad
+
+bool thrust_solution_valid
+float32 available_thrust_n
+float32 required_thrust_n
+float32 thrust_margin_n
+float32 remaining_impulse_ns
+float32 remaining_delta_v_m_s

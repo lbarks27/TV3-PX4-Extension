@@ -5,7 +5,7 @@ param set-default CA_RK_GRP_CNT 1
 param set-default CA_RK_REF_THR 250.0
 param set-default CA_RK_MIN_THR 20.0
 param set-default CA_RK_FAL_THR 60.0
-param set-default CA_RK_BODY_M 6.5
+param set-default CA_RK_BODY_M 1.0
 param set-default CA_RK_BODY_CMX 0.95
 param set-default CA_RK_MOT_WET 0.75
 param set-default CA_RK_MOT_DRY 0.28
@@ -31,6 +31,17 @@ param set-default CA_RK_G0_YTR 0.0
 param set-default RK_ENABLE 1
 param set-default RK_CMD_SRC 1
 param set-default RK_MOT_IDX 0
+param set-default RK_ENG_COUNT 1
+param set-default RK_IGN_IDX0 0
+param set-default RK_IGN_IDX1 1
+param set-default RK_IGN_IDX2 2
+param set-default RK_IGN_IDX3 3
+param set-default RK_IGN_DWELL_MS 0
+param set-default RK_ENG0_MOT 0
+param set-default RK_ENG1_MOT 0
+param set-default RK_ENG2_MOT 0
+param set-default RK_ENG3_MOT 0
+param set-default RK_SPLAY_MAX_DEG 5.0
 param set-default RK_LAUNCH_THR_N 10.0
 param set-default RK_IGNITION_MS 300
 param set-default RK_IGN_TO_MS 2000
@@ -41,11 +52,12 @@ param set-default RK_BURNOUT_MS 100
 param set-default RK_RAIL_LEN_M 3.5
 param set-default RK_ABORT_GCS 0
 
-param set-default RK_BODY_MASS_KG 6.5
+param set-default RK_BODY_MASS_KG 1.0
 param set-default RK_BODY_COM_X_M 0.95
 param set-default RK_MOTOR_COM_X_M 0.15
 param set-default RK_TVC_MAX_DEG 5.0
 param set-default RK_TVC_SLEW_DPS 250.0
+param set-default RK_TQ_R_MAX 0.0
 param set-default RK_TQ_P_MAX 10.0
 param set-default RK_TQ_Y_MAX 10.0
 param set-default RK_ATT_P_RAIL 2.0

@@ -695,7 +695,12 @@ index 0000000000..0000000000
 +Vector3f ActuatorEffectivenessRocket::normalizeOrDefault(const Vector3f &axis, const Vector3f &fallback)
 +{
 +	const float norm = axis.norm();
-+	return norm > FLT_EPSILON ? axis / norm : fallback;
++
++	if (norm > FLT_EPSILON) {
++		return axis / norm;
++	}
++
++	return fallback;
 +}
 +
 +Vector3f ActuatorEffectivenessRocket::computeTorque(const Vector3f &lever_arm, const Vector3f &thrust_axis,

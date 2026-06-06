@@ -15,7 +15,7 @@ param set-default RK_LC_SRC 0
 param set-default RK_LC_ALPHA 0.25
 param set-default RK_LC_TO_MS 200
 
-param set-default RK_GD_ENABLE 1
+param set-default RK_GD_ENABLE 0
 param set-default RK_GD_TAKE_ALT 35.0
 param set-default RK_GD_APEX_ALT 120.0
 param set-default RK_GD_POS_P 0.15
@@ -25,6 +25,9 @@ param set-default RK_GD_VDN_MS 8.0
 param set-default RK_GD_YAW_DEG 0.0
 param set-default RK_GD_HOLD_ALT 5.0
 param set-default RK_GD_ACC_RAD 15.0
+param set-default RK_GD_TWR_MIN 1.05
+param set-default RK_GD_LAND_TWR 1.15
+param set-default RK_GD_MIN_IMP_NS 0.0
 param set-default RK_GD_WP1_N 60.0
 param set-default RK_GD_WP1_E 0.0
 param set-default RK_GD_WP1_D -60.0

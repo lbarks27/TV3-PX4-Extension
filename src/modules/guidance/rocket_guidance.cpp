@@ -13,6 +13,7 @@
 #include <uORB/topics/home_position.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/rocket_guidance_status.h>
+#include <uORB/topics/rocket_motor_reference.h>
 #include <uORB/topics/rocket_status.h>
 #include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/vehicle_local_position.h>
@@ -27,6 +28,7 @@ using matrix::Vector3f;
 namespace
 {
 constexpr float kDegToRad = 0.017453292519943295769f;
+constexpr float kGravityMps2 = 9.80665f;
 constexpr size_t kMissionWaypointCount = 3;
 
 struct MissionPoint {
@@ -163,12 +165,15 @@ private:
 
 		_vehicle_status_sub.update(&_vehicle_status);
 		_local_position_sub.update(&_local_position);
+		_groundtruth_position_sub.update(&_groundtruth_position);
 		_home_position_sub.update(&_home_position);
+		_motor_reference_sub.update(&_motor_reference);
 		_rocket_status_sub.update(&_rocket_status);
 
 		const hrt_abstime now = hrt_absolute_time();
-		update_origin();
-		update_phase();
+		update_thrust_envelope();
+		update_origin(now);
+		update_phase(now);
 		publish_outputs(now);
 	}
 
@@ -184,6 +189,9 @@ private:
 		_fixed_yaw_deg = read_param_float("RK_GD_YAW_DEG", _fixed_yaw_deg);
 		_hold_altitude_m = read_param_float("RK_GD_HOLD_ALT", _hold_altitude_m);
 		_acceptance_radius_m = read_param_float("RK_GD_ACC_RAD", _acceptance_radius_m);
+		_min_twr = read_param_float("RK_GD_TWR_MIN", _min_twr);
+		_landing_twr = read_param_float("RK_GD_LAND_TWR", _landing_twr);
+		_min_remaining_impulse_ns = read_param_float("RK_GD_MIN_IMP_NS", _min_remaining_impulse_ns);
 
 		_mission_waypoints[0].position(0) = read_param_float("RK_GD_WP1_N", _mission_waypoints[0].position(0));
 		_mission_waypoints[0].position(1) = read_param_float("RK_GD_WP1_E", _mission_waypoints[0].position(1));
@@ -198,6 +206,7 @@ private:
 		_landing_point(0) = read_param_float("RK_GD_LAND_N", _landing_point(0));
 		_landing_point(1) = read_param_float("RK_GD_LAND_E", _landing_point(1));
 		_landing_point(2) = read_param_float("RK_GD_LAND_D", _landing_point(2));
+		_sim_groundtruth_fallback = read_param_int32("RK_GD_SIM_GT", _sim_groundtruth_fallback);
 
 		for (MissionPoint &waypoint : _mission_waypoints) {
 			waypoint.acceptance_radius_m = math::max(_acceptance_radius_m, 1.f);
@@ -205,7 +214,91 @@ private:
 		}
 	}
 
-	void update_origin()
+	void update_thrust_envelope()
+	{
+		const float mass_kg = math::max(_motor_reference.expected_vehicle_mass_kg, 0.f);
+		_available_thrust_n = math::max(_motor_reference.expected_thrust_n, 0.f);
+		_remaining_impulse_ns = math::max(_motor_reference.total_impulse_ns * (1.f - math::constrain(
+						 _motor_reference.burn_fraction, 0.f, 1.f)), 0.f);
+		_remaining_delta_v_m_s = mass_kg > 0.01f ? _remaining_impulse_ns / mass_kg : 0.f;
+		_last_required_thrust_n = 0.f;
+		_thrust_solution_valid = _motor_reference.loaded && mass_kg > 0.01f;
+	}
+
+	bool require_thrust_solution(uint8_t candidate_phase)
+	{
+		if (!_thrust_solution_valid) {
+			_last_required_thrust_n = 0.f;
+			enter_no_solution_state();
+			return false;
+		}
+
+		const float mass_kg = math::max(_motor_reference.expected_vehicle_mass_kg, 0.f);
+		const float twr = (candidate_phase == rocket_guidance_status_s::PHASE_LANDING_APPROACH
+				   || candidate_phase == rocket_guidance_status_s::PHASE_WAYPOINT_TRACK)
+				  ? math::max(_landing_twr, 1.f)
+				  : math::max(_min_twr, 0.1f);
+
+		_last_required_thrust_n = mass_kg * kGravityMps2 * twr;
+		const bool thrust_ok = _available_thrust_n >= _last_required_thrust_n;
+		const bool impulse_ok = _remaining_impulse_ns >= math::max(_min_remaining_impulse_ns, 0.f);
+		_thrust_solution_valid = thrust_ok && impulse_ok;
+
+		if (!_thrust_solution_valid) {
+			enter_no_solution_state();
+			return false;
+		}
+
+		return true;
+	}
+
+	void enter_no_solution_state()
+	{
+		_phase = _mission_started ? rocket_guidance_status_s::PHASE_ABORT : rocket_guidance_status_s::PHASE_STANDBY;
+		_last_target = _origin_valid ? _origin + _landing_point : Vector3f{NAN, NAN, NAN};
+		_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
+		_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
+	}
+
+	static bool finite_position(const vehicle_local_position_s &position)
+	{
+		return PX4_ISFINITE(position.x) && PX4_ISFINITE(position.y) && PX4_ISFINITE(position.z)
+		       && PX4_ISFINITE(position.vx) && PX4_ISFINITE(position.vy) && PX4_ISFINITE(position.vz);
+	}
+
+	static bool fresh_position(const vehicle_local_position_s &position, hrt_abstime now)
+	{
+		if (position.timestamp == 0) {
+			return false;
+		}
+
+		const hrt_abstime age = now > position.timestamp ? now - position.timestamp : 0;
+		return age <= 500_ms;
+	}
+
+	bool local_position_valid(hrt_abstime now) const
+	{
+		return _local_position.xy_valid && _local_position.z_valid
+		       && finite_position(_local_position) && fresh_position(_local_position, now);
+	}
+
+	bool groundtruth_position_valid(hrt_abstime now) const
+	{
+		return _sim_groundtruth_fallback > 0
+		       && finite_position(_groundtruth_position) && fresh_position(_groundtruth_position, now);
+	}
+
+	bool guidance_position_valid(hrt_abstime now) const
+	{
+		return local_position_valid(now) || groundtruth_position_valid(now);
+	}
+
+	const vehicle_local_position_s &guidance_position(hrt_abstime now) const
+	{
+		return local_position_valid(now) ? _local_position : _groundtruth_position;
+	}
+
+	void update_origin(hrt_abstime now)
 	{
 		if (_origin_valid) {
 			return;
@@ -217,8 +310,9 @@ private:
 			return;
 		}
 
-		if (_local_position.xy_valid && _local_position.z_valid) {
-			_origin = make_vector(_local_position.x, _local_position.y, _local_position.z);
+		if (guidance_position_valid(now)) {
+			const vehicle_local_position_s &position = guidance_position(now);
+			_origin = make_vector(position.x, position.y, position.z);
 			_origin_valid = true;
 		}
 	}
@@ -234,7 +328,7 @@ private:
 		_current_yaw_sp = 0.f;
 	}
 
-	void update_phase()
+	void update_phase(hrt_abstime now)
 	{
 		if (!_enabled) {
 			reset_mission();
@@ -242,7 +336,7 @@ private:
 		}
 
 		const bool armed = _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
-		const bool position_valid = _local_position.xy_valid && _local_position.z_valid;
+		const bool position_valid = guidance_position_valid(now);
 		const bool ready = _rocket_status.mode >= rocket_status_s::MODE_READY && _rocket_status.mode != rocket_status_s::MODE_ABORT;
 
 		if (_rocket_status.mode == rocket_status_s::MODE_ABORT) {
@@ -263,12 +357,17 @@ private:
 			return;
 		}
 
-		const Vector3f position{_local_position.x, _local_position.y, _local_position.z};
-		const Vector3f velocity{_local_position.vx, _local_position.vy, _local_position.vz};
+		const vehicle_local_position_s &guidance_pos = guidance_position(now);
+		const Vector3f position{guidance_pos.x, guidance_pos.y, guidance_pos.z};
+		const Vector3f velocity{guidance_pos.vx, guidance_pos.vy, guidance_pos.vz};
 		const Vector3f rel_pos = position - _origin;
 		const float altitude_m = -rel_pos(2);
 
 		if (_rocket_status.mode == rocket_status_s::MODE_IGNITION_PENDING || _rocket_status.mode == rocket_status_s::MODE_BOOST) {
+			if (!require_thrust_solution(rocket_guidance_status_s::PHASE_LAUNCH_ASCENT)) {
+				return;
+			}
+
 			_phase = rocket_guidance_status_s::PHASE_LAUNCH_ASCENT;
 			_mission_started = true;
 			_last_target = _origin + Vector3f{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
@@ -281,6 +380,10 @@ private:
 			_mission_started = true;
 
 			if (!_apogee_reached) {
+				if (!require_thrust_solution(rocket_guidance_status_s::PHASE_APOGEE_TRACK)) {
+					return;
+				}
+
 				_phase = rocket_guidance_status_s::PHASE_APOGEE_TRACK;
 				_last_target = _origin + Vector3f{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
 				_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
@@ -295,6 +398,10 @@ private:
 			}
 
 			if (_waypoint_index < kMissionWaypointCount) {
+				if (!require_thrust_solution(rocket_guidance_status_s::PHASE_WAYPOINT_TRACK)) {
+					return;
+				}
+
 				_phase = rocket_guidance_status_s::PHASE_WAYPOINT_TRACK;
 				const MissionPoint &target = _mission_waypoints[_waypoint_index];
 				const Vector3f target_global = _origin + target.position;
@@ -316,6 +423,10 @@ private:
 			}
 
 			_phase = rocket_guidance_status_s::PHASE_LANDING_APPROACH;
+			if (!require_thrust_solution(rocket_guidance_status_s::PHASE_LANDING_APPROACH)) {
+				return;
+			}
+
 			const Vector3f landing_global = _origin + _landing_point;
 			const Vector3f error = landing_global - position;
 			const float distance = error.norm();
@@ -337,6 +448,10 @@ private:
 		}
 
 		if (_mission_started) {
+			if (!require_thrust_solution(rocket_guidance_status_s::PHASE_LANDING_APPROACH)) {
+				return;
+			}
+
 			_phase = rocket_guidance_status_s::PHASE_LANDING_APPROACH;
 			const Vector3f landing_global = _origin + _landing_point;
 			const Vector3f error = landing_global - position;
@@ -359,13 +474,16 @@ private:
 
 	void publish_outputs(hrt_abstime now)
 	{
+		const bool position_valid = guidance_position_valid(now);
+		const vehicle_local_position_s &guidance_pos = guidance_position(now);
+
 		rocket_guidance_status_s status{};
 		status.timestamp = now;
 		status.phase = _phase;
 		status.active = _enabled > 0 && _phase != rocket_guidance_status_s::PHASE_STANDBY;
 		status.armed = _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
 		status.origin_valid = _origin_valid;
-		status.position_valid = _local_position.xy_valid && _local_position.z_valid;
+		status.position_valid = position_valid;
 		status.rocket_ready = _rocket_status.ready;
 		status.rocket_boosting = _rocket_status.mode == rocket_status_s::MODE_BOOST;
 		status.rocket_coasting = _rocket_status.mode == rocket_status_s::MODE_COAST;
@@ -375,21 +493,27 @@ private:
 		status.target_n = _last_target(0);
 		status.target_e = _last_target(1);
 		status.target_d = _last_target(2);
-		status.target_distance_m = (status.position_valid && _origin_valid)
-					   ? (_last_target - Vector3f{_local_position.x, _local_position.y, _local_position.z}).norm()
+		status.target_distance_m = (position_valid && _origin_valid)
+					   ? (_last_target - Vector3f{guidance_pos.x, guidance_pos.y, guidance_pos.z}).norm()
 					   : NAN;
 		status.cross_track_error_m = 0.f;
 		status.down_track_error_m = 0.f;
 		status.commanded_speed_m_s = _last_velocity_sp.norm();
 		status.commanded_climb_rate_m_s = -_last_velocity_sp(2);
 		status.commanded_yaw_rad = _current_yaw_sp;
+		status.thrust_solution_valid = _thrust_solution_valid;
+		status.available_thrust_n = _available_thrust_n;
+		status.required_thrust_n = _last_required_thrust_n;
+		status.thrust_margin_n = _available_thrust_n - _last_required_thrust_n;
+		status.remaining_impulse_ns = _remaining_impulse_ns;
+		status.remaining_delta_v_m_s = _remaining_delta_v_m_s;
 		_status_pub.publish(status);
 
 		trajectory_setpoint_s setpoint{};
 		setpoint.timestamp = now;
 
-		if (_origin_valid && status.position_valid) {
-			const Vector3f position{_local_position.x, _local_position.y, _local_position.z};
+		if (_origin_valid && position_valid) {
+			const Vector3f position{guidance_pos.x, guidance_pos.y, guidance_pos.z};
 			Vector3f position_sp = _last_target;
 			Vector3f velocity_sp = _last_velocity_sp;
 
@@ -440,6 +564,7 @@ private:
 	}
 
 	int32_t _enabled{1};
+	int32_t _sim_groundtruth_fallback{0};
 	float _takeoff_alt_m{35.f};
 	float _apex_alt_m{120.f};
 	float _position_gain{0.15f};
@@ -449,6 +574,9 @@ private:
 	float _fixed_yaw_deg{0.f};
 	float _hold_altitude_m{5.f};
 	float _acceptance_radius_m{15.f};
+	float _min_twr{1.05f};
+	float _landing_twr{1.15f};
+	float _min_remaining_impulse_ns{0.f};
 
 	std::array<MissionPoint, kMissionWaypointCount> _mission_waypoints{{
 		{make_vector(60.f, 0.f, -60.f), 15.f, 25.f},
@@ -466,17 +594,26 @@ private:
 	Vector3f _last_target{NAN, NAN, NAN};
 	Vector3f _last_velocity_sp{0.f, 0.f, 0.f};
 	float _current_yaw_sp{0.f};
+	bool _thrust_solution_valid{false};
+	float _available_thrust_n{0.f};
+	float _last_required_thrust_n{0.f};
+	float _remaining_impulse_ns{0.f};
+	float _remaining_delta_v_m_s{0.f};
 
 	vehicle_local_position_s _local_position{};
+	vehicle_local_position_s _groundtruth_position{};
 	home_position_s _home_position{};
 	vehicle_status_s _vehicle_status{};
 	rocket_status_s _rocket_status{};
+	rocket_motor_reference_s _motor_reference{};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _local_position_sub{ORB_ID(vehicle_local_position)};
+	uORB::Subscription _groundtruth_position_sub{ORB_ID(vehicle_local_position_groundtruth)};
 	uORB::Subscription _home_position_sub{ORB_ID(home_position)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _rocket_status_sub{ORB_ID(rocket_status)};
+	uORB::Subscription _motor_reference_sub{ORB_ID(rocket_motor_reference)};
 	uORB::Publication<trajectory_setpoint_s> _setpoint_pub{ORB_ID(trajectory_setpoint)};
 	uORB::Publication<rocket_guidance_status_s> _status_pub{ORB_ID(rocket_guidance_status)};
 };

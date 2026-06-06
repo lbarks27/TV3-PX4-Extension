@@ -10,6 +10,7 @@
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/rocket_engine_command.h>
 #include <uORB/topics/rocket_motor_reference.h>
 #include <uORB/topics/rocket_status.h>
 
@@ -29,6 +30,7 @@ namespace
 {
 constexpr const char *kDefaultMotorRoot = "/fs/microsd/tv3/motors";
 constexpr size_t kMaxLineLength = 1024;
+constexpr int kMaxEngines = 4;
 
 struct CatalogEntry {
 	uint16_t index{0};
@@ -53,6 +55,16 @@ struct MotorSpecs {
 	float length_m{0.f};
 	float total_impulse_ns{0.f};
 	float burn_duration_s{0.f};
+};
+
+struct MotorSlot {
+	int32_t motor_index{0};
+	bool loaded{false};
+	bool burn_active{false};
+	hrt_abstime burn_start{0};
+	CatalogEntry selected{};
+	MotorSpecs specs{};
+	std::vector<CurvePoint> curve{};
 };
 
 static inline std::string trim(const std::string &value)
@@ -128,11 +140,6 @@ static void copy_motor_id(char (&dst)[32], const std::string &src)
 	strncpy(dst, src.c_str(), sizeof(dst) - 1);
 }
 
-static bool is_nonempty(const std::string &value)
-{
-	return !trim(value).empty();
-}
-
 static bool parse_float(const std::string &value, float &out)
 {
 	char *end = nullptr;
@@ -166,22 +173,30 @@ public:
 		ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers)
 	{
 		const char *env_root = getenv("TV3_MOTOR_ROOT");
-		_motor_root = env_root != nullptr ? env_root : kDefaultMotorRoot;
-		_param_motor_index = param_find("RK_MOT_IDX");
-		_param_body_mass_kg = param_find("RK_BODY_MASS_KG");
-		_param_parameter_update = ORB_ID(parameter_update);
-		update_parameters();
-	}
+			_motor_root = env_root != nullptr ? env_root : kDefaultMotorRoot;
+			_param_motor_index = param_find("RK_MOT_IDX");
+			_param_engine_count = param_find("RK_ENG_COUNT");
+			for (int i = 0; i < kMaxEngines; ++i) {
+				char name[16];
+				snprintf(name, sizeof(name), "RK_ENG%d_MOT", i);
+				_param_engine_motor_index[i] = param_find(name);
+			}
+			_param_body_mass_kg = param_find("RK_BODY_MASS_KG");
+			_param_parameter_update = ORB_ID(parameter_update);
+			update_parameters();
+		}
 
 	static int task_spawn(int argc, char *argv[])
 	{
 		int ch;
+		int myoptind = 1;
+		const char *myoptarg = nullptr;
 		const char *data_root = nullptr;
 
-		while ((ch = px4_getopt(argc, argv, "d:", nullptr, nullptr)) != EOF) {
+		while ((ch = px4_getopt(argc, argv, "d:", &myoptind, &myoptarg)) != EOF) {
 			switch (ch) {
 			case 'd':
-				data_root = optarg;
+				data_root = myoptarg;
 				break;
 
 			default:
@@ -233,18 +248,21 @@ public:
 
 	bool init()
 	{
+		_motor_loaded = load_selected_motor();
 		ScheduleOnInterval(20_ms);
-		return load_selected_motor();
+		return true;
 	}
 
 	int print_status() override
 	{
-		PX4_INFO("motor root: %s", _motor_root.c_str());
-		PX4_INFO("motor index: %d", _motor_index);
-		PX4_INFO("selected motor: %s", _selected.motor_id.c_str());
-		PX4_INFO("curve points: %u", (unsigned)_curve.size());
-		return 0;
-	}
+			PX4_INFO("motor root: %s", _motor_root.c_str());
+			PX4_INFO("engine count: %d", _engine_count);
+			for (int i = 0; i < _engine_count; ++i) {
+				PX4_INFO("engine %d motor %d: %s (%u points)", i, _engines[i].motor_index,
+					 _engines[i].selected.motor_id.c_str(), (unsigned)_engines[i].curve.size());
+			}
+			return 0;
+		}
 
 private:
 	void Run() override
@@ -255,16 +273,26 @@ private:
 			return;
 		}
 
-		if (_parameter_update_sub.updated()) {
-			parameter_update_s update{};
-			_parameter_update_sub.copy(&update);
-			const int32_t previous_index = _motor_index;
-			update_parameters();
+			if (_parameter_update_sub.updated()) {
+				parameter_update_s update{};
+				_parameter_update_sub.copy(&update);
+				const int32_t previous_index = _motor_index;
+				const int32_t previous_count = _engine_count;
+				int32_t previous_engine_indices[kMaxEngines]{};
+				for (int i = 0; i < kMaxEngines; ++i) {
+					previous_engine_indices[i] = _engines[i].motor_index;
+				}
+				update_parameters();
 
-			if (previous_index != _motor_index) {
-				load_selected_motor();
+				bool engine_selection_changed = previous_count != _engine_count || previous_index != _motor_index;
+				for (int i = 0; i < kMaxEngines; ++i) {
+					engine_selection_changed = engine_selection_changed || previous_engine_indices[i] != _engines[i].motor_index;
+				}
+
+				if (engine_selection_changed) {
+					load_selected_motor();
+				}
 			}
-		}
 
 		update_status();
 		publish_reference();
@@ -272,13 +300,30 @@ private:
 
 	void update_parameters()
 	{
-		if (_param_motor_index != PARAM_INVALID) {
-			param_get(_param_motor_index, &_motor_index);
-			_motor_index = math::max(_motor_index, 0);
-		}
+			if (_param_motor_index != PARAM_INVALID) {
+				param_get(_param_motor_index, &_motor_index);
+				_motor_index = math::max(_motor_index, 0);
+			}
 
-		if (_param_body_mass_kg != PARAM_INVALID) {
-			param_get(_param_body_mass_kg, &_body_mass_kg);
+			if (_param_engine_count != PARAM_INVALID) {
+				param_get(_param_engine_count, &_engine_count);
+				_engine_count = math::constrain(_engine_count, 1, kMaxEngines);
+			}
+
+			for (int i = 0; i < kMaxEngines; ++i) {
+				int32_t fallback = i == 0 ? _motor_index : _engines[i].motor_index;
+				if (_param_engine_motor_index[i] != PARAM_INVALID) {
+					param_get(_param_engine_motor_index[i], &fallback);
+				}
+				_engines[i].motor_index = math::max(fallback, 0);
+			}
+
+			if (_engine_count <= 1) {
+				_engines[0].motor_index = _motor_index;
+			}
+
+			if (_param_body_mass_kg != PARAM_INVALID) {
+				param_get(_param_body_mass_kg, &_body_mass_kg);
 			_body_mass_kg = math::max(_body_mass_kg, 0.f);
 		}
 	}
@@ -410,87 +455,110 @@ private:
 		return !curve.empty();
 	}
 
-	bool load_selected_motor()
-	{
-		std::vector<CatalogEntry> entries;
+		bool load_motor_from_catalog(const std::vector<CatalogEntry> &entries, MotorSlot &slot)
+		{
+			auto it = std::find_if(entries.begin(), entries.end(), [&](const CatalogEntry &entry) {
+				return entry.index == static_cast<uint16_t>(slot.motor_index) && entry.active;
+			});
 
-		if (!load_catalog(entries)) {
-			_motor_loaded = false;
-			return false;
-		}
+			if (it == entries.end()) {
+				PX4_ERR("motor index %d unavailable", slot.motor_index);
+				slot.loaded = false;
+				return false;
+			}
 
-		auto it = std::find_if(entries.begin(), entries.end(), [&](const CatalogEntry &entry) {
-			return entry.index == static_cast<uint16_t>(_motor_index) && entry.active;
-		});
-
-		if (it == entries.end()) {
-			PX4_ERR("motor index %d unavailable", _motor_index);
-			_motor_loaded = false;
-			return false;
-		}
-
-		std::vector<CurvePoint> curve;
-		MotorSpecs specs{};
+			std::vector<CurvePoint> curve;
+			MotorSpecs specs{};
 		const std::string curve_path = join_path(_motor_root, it->curve_file);
 		const std::string specs_path = join_path(_motor_root, it->specs_file);
 
-		if (!load_curve(curve_path, curve) || !load_specs(specs_path, specs)) {
-			_motor_loaded = false;
-			return false;
+			if (!load_curve(curve_path, curve) || !load_specs(specs_path, specs)) {
+				slot.loaded = false;
+				return false;
+			}
+
+			slot.selected = *it;
+			slot.curve = curve;
+			slot.specs = specs;
+			slot.loaded = true;
+			slot.burn_active = false;
+			slot.burn_start = 0;
+			return true;
 		}
 
-		_selected = *it;
-		_curve = curve;
-		_specs = specs;
-		_motor_loaded = true;
-		_burn_active = false;
-		_burn_start = 0;
-		return true;
-	}
+		bool load_selected_motor()
+		{
+			std::vector<CatalogEntry> entries;
+
+			if (!load_catalog(entries)) {
+				_motor_loaded = false;
+				return false;
+			}
+
+			bool all_loaded = true;
+			for (int i = 0; i < _engine_count; ++i) {
+				all_loaded = load_motor_from_catalog(entries, _engines[i]) && all_loaded;
+			}
+
+			_motor_loaded = all_loaded;
+			_selected = _engines[0].selected;
+			_specs = _engines[0].specs;
+			_curve = _engines[0].curve;
+			return all_loaded;
+		}
 
 	void update_status()
 	{
 		rocket_status_s status{};
 
-		if (_rocket_status_sub.update(&status)) {
-			_status = status;
+			if (_rocket_status_sub.update(&status)) {
+				_status = status;
+			}
+
+			_rocket_engine_command_sub.update(&_engine_command);
+
+			const bool status_should_burn = (_status.mode == rocket_status_s::MODE_IGNITION_PENDING
+							 || _status.mode == rocket_status_s::MODE_BOOST);
+
+			for (int i = 0; i < _engine_count; ++i) {
+				const uint8_t mask = static_cast<uint8_t>(1u << i);
+				const bool command_should_burn = _engine_command.timestamp != 0 && (_engine_command.ignition_mask & mask) != 0;
+				const bool should_burn = _engine_command.timestamp != 0 ? command_should_burn : status_should_burn;
+
+				if (should_burn && !_engines[i].burn_active) {
+					_engines[i].burn_active = true;
+					_engines[i].burn_start = hrt_absolute_time();
+				}
+
+				if (!status_should_burn) {
+					_engines[i].burn_active = false;
+					_engines[i].burn_start = 0;
+				}
+			}
 		}
 
-		const bool should_burn = (_status.mode == rocket_status_s::MODE_IGNITION_PENDING
-					|| _status.mode == rocket_status_s::MODE_BOOST);
-
-		if (should_burn && !_burn_active) {
-			_burn_active = true;
-			_burn_start = hrt_absolute_time();
-		}
-
-		if (!should_burn) {
-			_burn_active = false;
-			_burn_start = 0;
-		}
-	}
-
-	void sample_curve(float burn_time_s, float &thrust_n, float &motor_mass_kg, float &burn_fraction, float &impulse_ns) const
-	{
-		if (_curve.empty()) {
-			thrust_n = 0.f;
-			motor_mass_kg = 0.f;
-			burn_fraction = 0.f;
+		void sample_curve(const MotorSlot &slot, float burn_time_s, float &thrust_n, float &motor_mass_kg, float &burn_fraction,
+				  float &impulse_ns) const
+		{
+			if (slot.curve.empty()) {
+				thrust_n = 0.f;
+				motor_mass_kg = 0.f;
+				burn_fraction = 0.f;
 			impulse_ns = 0.f;
 			return;
 		}
 
-		if (burn_time_s <= _curve.front().time_s) {
-			thrust_n = _curve.front().thrust_n;
-			motor_mass_kg = _curve.front().motor_mass_kg;
-			burn_fraction = _curve.front().burn_fraction;
-			impulse_ns = _curve.front().cumulative_impulse_ns;
-			return;
-		}
+			if (burn_time_s <= slot.curve.front().time_s) {
+				thrust_n = slot.curve.front().thrust_n;
+				motor_mass_kg = slot.curve.front().motor_mass_kg;
+				burn_fraction = slot.curve.front().burn_fraction;
+				impulse_ns = slot.curve.front().cumulative_impulse_ns;
+				return;
+			}
 
-		for (size_t i = 1; i < _curve.size(); ++i) {
-			const CurvePoint &a = _curve[i - 1];
-			const CurvePoint &b = _curve[i];
+			for (size_t i = 1; i < slot.curve.size(); ++i) {
+				const CurvePoint &a = slot.curve[i - 1];
+				const CurvePoint &b = slot.curve[i];
 
 			if (burn_time_s <= b.time_s) {
 				const float alpha = (burn_time_s - a.time_s) / math::max(b.time_s - a.time_s, 1e-4f);
@@ -502,64 +570,95 @@ private:
 			}
 		}
 
-		thrust_n = 0.f;
-		motor_mass_kg = math::max(_specs.dry_mass_kg, 0.f);
-		burn_fraction = 1.f;
-		impulse_ns = _specs.total_impulse_ns;
-	}
+			thrust_n = 0.f;
+			motor_mass_kg = math::max(slot.specs.dry_mass_kg, 0.f);
+			burn_fraction = 1.f;
+			impulse_ns = slot.specs.total_impulse_ns;
+		}
 
 	void publish_reference()
 	{
-		rocket_motor_reference_s ref{};
-		ref.timestamp = hrt_absolute_time();
-		ref.loaded = _motor_loaded;
-		ref.active = _motor_loaded && _burn_active;
-		ref.selected_motor_index = static_cast<uint16_t>(_motor_index);
-		copy_motor_id(ref.selected_motor_id, _selected.motor_id);
+			rocket_motor_reference_s ref{};
+			ref.timestamp = hrt_absolute_time();
+			ref.loaded = _motor_loaded;
+			ref.engine_count = static_cast<uint8_t>(_engine_count);
+			ref.ignition_mask = _engine_command.ignition_mask;
+			ref.selected_motor_index = static_cast<uint16_t>(_motor_index);
+			copy_motor_id(ref.selected_motor_id, _selected.motor_id);
 
-		if (_motor_loaded) {
-			ref.burn_duration_s = _specs.burn_duration_s;
-			ref.total_impulse_ns = _specs.total_impulse_ns;
-			float thrust_n = 0.f;
-			float motor_mass_kg = _specs.loaded_mass_kg;
-			float burn_fraction = 0.f;
-			float impulse_ns = 0.f;
-			float burn_time_s = 0.f;
+			if (_motor_loaded) {
+				float total_thrust_n = 0.f;
+				float total_motor_mass_kg = 0.f;
+				float total_impulse_ns = 0.f;
+				float total_impulse_used_ns = 0.f;
+				float max_burn_duration_s = 0.f;
+				float max_burn_time_s = 0.f;
+				uint8_t active_mask = 0;
 
-			if (_burn_active && _burn_start != 0) {
-				burn_time_s = static_cast<float>(hrt_absolute_time() - _burn_start) * 1e-6f;
-				sample_curve(burn_time_s, thrust_n, motor_mass_kg, burn_fraction, impulse_ns);
+				for (int i = 0; i < _engine_count; ++i) {
+					const MotorSlot &slot = _engines[i];
+					float thrust_n = 0.f;
+					float motor_mass_kg = slot.specs.loaded_mass_kg;
+					float burn_fraction = 0.f;
+					float impulse_ns = 0.f;
+					float burn_time_s = 0.f;
+
+					if (slot.burn_active && slot.burn_start != 0) {
+						burn_time_s = static_cast<float>(hrt_absolute_time() - slot.burn_start) * 1e-6f;
+						sample_curve(slot, burn_time_s, thrust_n, motor_mass_kg, burn_fraction, impulse_ns);
+						active_mask |= static_cast<uint8_t>(1u << i);
+					}
+
+					ref.expected_thrust_n_engine[i] = thrust_n;
+					ref.expected_motor_mass_kg_engine[i] = math::max(motor_mass_kg, slot.specs.dry_mass_kg);
+					ref.burn_fraction_engine[i] = math::constrain(burn_fraction, 0.f, 1.f);
+					ref.burn_time_s_engine[i] = burn_time_s;
+					ref.selected_motor_index_engine[i] = static_cast<uint16_t>(slot.motor_index);
+
+					total_thrust_n += thrust_n;
+					total_motor_mass_kg += ref.expected_motor_mass_kg_engine[i];
+					total_impulse_ns += slot.specs.total_impulse_ns;
+					total_impulse_used_ns += impulse_ns;
+					max_burn_duration_s = math::max(max_burn_duration_s, slot.specs.burn_duration_s);
+					max_burn_time_s = math::max(max_burn_time_s, burn_time_s);
+				}
+
+				ref.active_mask = active_mask;
+				ref.active = active_mask != 0;
+				ref.burn_duration_s = max_burn_duration_s;
+				ref.burn_time_s = max_burn_time_s;
+				ref.expected_thrust_n = total_thrust_n;
+				ref.expected_motor_mass_kg = total_motor_mass_kg;
+				ref.expected_vehicle_mass_kg = _body_mass_kg + total_motor_mass_kg;
+				ref.burn_fraction = total_impulse_ns > 1e-3f ? math::constrain(total_impulse_used_ns / total_impulse_ns, 0.f, 1.f) : 0.f;
+				ref.total_impulse_ns = total_impulse_ns;
 			}
-
-			ref.burn_time_s = burn_time_s;
-			ref.expected_thrust_n = thrust_n;
-			ref.expected_motor_mass_kg = math::max(motor_mass_kg, _specs.dry_mass_kg);
-			ref.expected_vehicle_mass_kg = _body_mass_kg + ref.expected_motor_mass_kg;
-			ref.burn_fraction = math::constrain(burn_fraction, 0.f, 1.f);
-			ref.total_impulse_ns = _specs.total_impulse_ns;
-		}
 
 		_ref_pub.publish(ref);
 	}
 
-	std::string _motor_root{kDefaultMotorRoot};
-	int32_t _motor_index{0};
-	float _body_mass_kg{0.f};
-	bool _motor_loaded{false};
-	bool _burn_active{false};
-	hrt_abstime _burn_start{0};
+		std::string _motor_root{kDefaultMotorRoot};
+		int32_t _motor_index{0};
+		int32_t _engine_count{1};
+		float _body_mass_kg{0.f};
+		bool _motor_loaded{false};
 
-	CatalogEntry _selected{};
-	MotorSpecs _specs{};
-	std::vector<CurvePoint> _curve{};
-	rocket_status_s _status{};
+		CatalogEntry _selected{};
+		MotorSpecs _specs{};
+		std::vector<CurvePoint> _curve{};
+		MotorSlot _engines[kMaxEngines]{};
+		rocket_status_s _status{};
+		rocket_engine_command_s _engine_command{};
 
-	param_t _param_motor_index{PARAM_INVALID};
-	param_t _param_body_mass_kg{PARAM_INVALID};
-	orb_id_t _param_parameter_update{};
+		param_t _param_motor_index{PARAM_INVALID};
+		param_t _param_engine_count{PARAM_INVALID};
+		param_t _param_engine_motor_index[kMaxEngines]{PARAM_INVALID, PARAM_INVALID, PARAM_INVALID, PARAM_INVALID};
+		param_t _param_body_mass_kg{PARAM_INVALID};
+		orb_id_t _param_parameter_update{};
 
-	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
-	uORB::Subscription _rocket_status_sub{ORB_ID(rocket_status)};
+		uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
+		uORB::Subscription _rocket_engine_command_sub{ORB_ID(rocket_engine_command)};
+		uORB::Subscription _rocket_status_sub{ORB_ID(rocket_status)};
 	uORB::Publication<rocket_motor_reference_s> _ref_pub{ORB_ID(rocket_motor_reference)};
 };
 

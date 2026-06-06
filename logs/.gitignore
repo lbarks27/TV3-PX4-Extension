@@ -2,8 +2,11 @@
 !/README.md
 !/.gitignore
 !/sim/
+sim/*
 !/sim/.gitkeep
 !/flight/
+flight/*
 !/flight/.gitkeep
 !/ground/
+ground/*
 !/ground/.gitkeep

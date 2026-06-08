@@ -4,9 +4,11 @@
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 
 #include <lib/parameters/param.h>
+#include <lib/systemlib/mavlink_log.h>
 #include <geo/geo.h>
 #include <mathlib/mathlib.h>
 
+#include <uORB/uORB.h>
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/internal_combustion_engine_control.h>
@@ -22,6 +24,7 @@
 #include <uORB/topics/vehicle_status.h>
 
 #include <stdio.h>
+#include <stdint.h>
 
 using namespace time_literals;
 
@@ -38,6 +41,81 @@ static void copy_motor_id(char (&dst)[32], const char (&src)[32])
 static uint8_t engine_bit(int engine_index)
 {
 	return engine_index >= 0 && engine_index < 8 ? static_cast<uint8_t>(1u << engine_index) : 0;
+}
+
+static const char *command_name(uint8_t command)
+{
+	switch (command) {
+	case rocket_command_s::COMMAND_LAUNCH:
+		return "launch";
+
+	case rocket_command_s::COMMAND_ABORT:
+		return "abort";
+
+	case rocket_command_s::COMMAND_RESET:
+		return "reset";
+
+	default:
+		return "unknown";
+	}
+}
+
+static const char *mode_name(uint8_t mode)
+{
+	switch (mode) {
+	case rocket_status_s::MODE_DISARMED_SAFE:
+		return "DISARMED_SAFE";
+
+	case rocket_status_s::MODE_ARMED_STANDBY:
+		return "ARMED_STANDBY";
+
+	case rocket_status_s::MODE_READY:
+		return "READY";
+
+	case rocket_status_s::MODE_IGNITION_PENDING:
+		return "IGNITION_PENDING";
+
+	case rocket_status_s::MODE_BOOST:
+		return "BOOST";
+
+	case rocket_status_s::MODE_COAST:
+		return "COAST";
+
+	case rocket_status_s::MODE_ABORT:
+		return "ABORT";
+
+	default:
+		return "UNKNOWN";
+	}
+}
+
+static const char *fault_name(uint32_t fault)
+{
+	switch (fault) {
+	case rocket_status_s::FAULT_NONE:
+		return "none";
+
+	case rocket_status_s::FAULT_COMMAND_ABORT:
+		return "command_abort";
+
+	case rocket_status_s::FAULT_IGNITION_TIMEOUT:
+		return "ignition_timeout";
+
+	case rocket_status_s::FAULT_SENSOR_STALE:
+		return "sensor_stale";
+
+	case rocket_status_s::FAULT_GCS_LOSS:
+		return "gcs_loss";
+
+	case rocket_status_s::FAULT_MOTOR_DATA:
+		return "motor_data";
+
+	case rocket_status_s::FAULT_ARMING:
+		return "arming";
+
+	default:
+		return "unknown";
+	}
 }
 }
 
@@ -153,6 +231,7 @@ private:
 
 		process_commands();
 		update_state(now);
+		announce_state_if_changed();
 		publish_outputs(now);
 	}
 
@@ -168,8 +247,16 @@ private:
 
 		while (_vehicle_command_sub.update(&vehicle_cmd)) {
 			if (vehicle_cmd.command == kRocketVehicleCommand) {
-				handle_rocket_command(static_cast<uint8_t>(vehicle_cmd.param1));
-				publish_ack(vehicle_cmd, vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED);
+				const uint8_t command = static_cast<uint8_t>(vehicle_cmd.param1);
+				const bool accepted = handle_rocket_command(command);
+				publish_ack(vehicle_cmd, accepted ? vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED :
+					    vehicle_command_ack_s::VEHICLE_CMD_RESULT_DENIED);
+
+				if (accepted) {
+					mavlink_log_info(&_mavlink_log_pub, "TV3 command %s accepted\t", command_name(command));
+				} else {
+					mavlink_log_warning(&_mavlink_log_pub, "TV3 command rejected param1 %.1f\t", (double)vehicle_cmd.param1);
+				}
 			}
 		}
 	}
@@ -184,23 +271,23 @@ private:
 		_command_pub.publish(msg);
 	}
 
-	void handle_rocket_command(uint8_t command)
+	bool handle_rocket_command(uint8_t command)
 	{
 		switch (command) {
 		case rocket_command_s::COMMAND_LAUNCH:
 			_launch_requested = true;
-			break;
+			return true;
 
 		case rocket_command_s::COMMAND_ABORT:
 			_abort_requested = true;
-			break;
+			return true;
 
 		case rocket_command_s::COMMAND_RESET:
 			_reset_requested = true;
-			break;
+			return true;
 
 		default:
-			break;
+			return false;
 		}
 	}
 
@@ -214,6 +301,22 @@ private:
 		ack.target_component = cmd.source_component;
 		ack.from_external = true;
 		_ack_pub.publish(ack);
+	}
+
+	void announce_state_if_changed()
+	{
+		if (_mode == _last_announced_mode && _fault_reason == _last_announced_fault) {
+			return;
+		}
+
+		if (_mode == rocket_status_s::MODE_ABORT || _fault_reason != rocket_status_s::FAULT_NONE) {
+			mavlink_log_critical(&_mavlink_log_pub, "TV3 state %s fault %s\t", mode_name(_mode), fault_name(_fault_reason));
+		} else {
+			mavlink_log_info(&_mavlink_log_pub, "TV3 state %s\t", mode_name(_mode));
+		}
+
+		_last_announced_mode = _mode;
+		_last_announced_fault = _fault_reason;
 	}
 
 	void update_parameters()
@@ -622,10 +725,12 @@ private:
 	float _rail_distance_m{0.f};
 	float _rail_velocity_m_s{0.f};
 		hrt_abstime _ignition_timestamp{0};
-		hrt_abstime _boost_timestamp{0};
-		hrt_abstime _burnout_low_timestamp{0};
-		hrt_abstime _current_engine_confirm_timestamp{0};
-		hrt_abstime _last_update{0};
+			hrt_abstime _boost_timestamp{0};
+			hrt_abstime _burnout_low_timestamp{0};
+			hrt_abstime _current_engine_confirm_timestamp{0};
+			hrt_abstime _last_update{0};
+			uint8_t _last_announced_mode{UINT8_MAX};
+			uint32_t _last_announced_fault{UINT32_MAX};
 
 		vehicle_status_s _vehicle_status{};
 		rocket_thrust_s _thrust{};
@@ -644,6 +749,7 @@ private:
 		uORB::Publication<rocket_status_s> _status_pub{ORB_ID(rocket_status)};
 	uORB::Publication<rocket_mode_status_s> _compat_status_pub{ORB_ID(rocket_mode_status)};
 	uORB::Publication<vehicle_command_ack_s> _ack_pub{ORB_ID(vehicle_command_ack)};
+	orb_advert_t _mavlink_log_pub{nullptr};
 };
 
 extern "C" __EXPORT int rocket_mode_manager_main(int argc, char *argv[])

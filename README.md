@@ -11,6 +11,7 @@ Flight profiles in `config/flight_profiles/` define scenario targets that can be
 ## Documentation
 
 - **[Simulation Guide](docs/simulation.md)** — macOS prerequisites, first-time setup, recommended daily workflow, QGroundControl connection, ports, and troubleshooting.
+- **[Hardware Flight Workflow](docs/hardware_flight_workflow.md)** — Cube Orange Plus upload, microSD runtime staging, QGC setup, parameter checks, and launch-day software flow.
 - **[Completion Roadmap](docs/completion_roadmap.md)** — current state, detailed phase plan, flight gates, and immediate next work for both vehicles.
 - **[Implementation Phases](docs/implementation_phases.md)** — high-level product intent (see roadmap for the active plan).
 

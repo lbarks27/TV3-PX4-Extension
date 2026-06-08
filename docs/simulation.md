@@ -6,7 +6,7 @@ This guide explains how to run the TV3 rocket simulation using PX4's Gazebo (gz)
 
 1. **Homebrew** (package manager)
 2. **Gazebo Harmonic** (gz sim 8.x)
-   ```bash
+grok   ```bash
    brew install gz-harmonic
    ```
    Verify:
@@ -146,14 +146,82 @@ INFO  [mavlink] mode: Normal, data rate: 4000000 B/s on udp port 18570 remote po
 5. Click **OK**, then select the new link and click **Connect**.
 6. You should see a vehicle appear. Because `MAV_TYPE=9` (Rocket), QGC has limited vehicle-specific UI. You will mostly see:
    - Attitude / position
-   - Custom mode (the rocket mode manager states)
+   - QGC messages from the rocket mode manager state machine
    - Parameter editor (all the `RK_*` and `CA_RK_*` parameters)
    - MAVLink console
 
 **Tips**:
 - The link is restricted to localhost by default for security (`MAV_0_BROADCAST=0`). This is fine for local QGC.
 - If QGC does not auto-discover the link, the manual UDP 18570 entry almost always works.
-- You can send `MAV_CMD_USER_1` (31010) with the appropriate param to trigger launch / abort / reset from the MAVLink console or a custom GCS widget.
+
+### TV3 State Machine Access From QGC
+
+The native QGC UI does not decode the custom `rocket_status` or
+`rocket_mode_status` uORB topics as first-class widgets. This repo exposes the
+state machine to QGC in three practical ways:
+
+1. **QGC messages**: `rocket_mode_manager` sends MAVLink status text whenever
+   the state or fault changes. Watch the QGC message area for:
+   - `TV3 state DISARMED_SAFE`
+   - `TV3 state ARMED_STANDBY`
+   - `TV3 state READY`
+   - `TV3 state IGNITION_PENDING`
+   - `TV3 state BOOST`
+   - `TV3 state COAST`
+   - `TV3 state ABORT fault <reason>`
+2. **MAVLink Console**: In QGC, open **Analyze Tools -> MAVLink Console** and
+   run:
+   ```sh
+   rocket_mode_manager status
+   listener rocket_status
+   listener rocket_mode_status
+   listener vehicle_command_ack
+   ```
+3. **ULog review**: `rocket_status` and `rocket_mode_status` are recorded in
+   the repo-local sim log archive. Use `./tools/plot_ulog.py --latest` after a
+   run for post-flight review.
+
+### TV3 Commands From QGC
+
+The firmware accepts `MAV_CMD_USER_1` / command `31010` through
+`rocket_mode_manager`:
+
+| Action | `param1` | Equivalent PX4 shell command |
+| --- | ---: | --- |
+| Launch | `1` | `rocket_mode_manager launch` |
+| Abort | `2` | `rocket_mode_manager abort` |
+| Reset | `3` | `rocket_mode_manager reset` |
+
+Invalid `param1` values are denied with `vehicle_command_ack`.
+
+For QGC Fly View buttons, install this repo's action file:
+
+```bash
+./scripts/install_qgc_actions.sh
+```
+
+This copies `config/qgc/TV3RocketActions.json` into:
+
+```text
+~/Documents/QGroundControl/MavlinkActions/TV3RocketActions.json
+```
+
+Restart QGC after installing. The Fly View action list will include
+`TV3 Launch`, `TV3 Abort`, and `TV3 Reset`. QGC loads MAVLink action files only
+at startup.
+
+You can also use the MAVLink Console shell commands directly:
+
+```sh
+commander arm
+rocket_mode_manager launch
+rocket_mode_manager abort
+rocket_mode_manager reset
+```
+
+The state machine still enforces its internal gates: the vehicle must be armed,
+`RK_ENABLE` must be enabled, and a motor must be loaded before `READY` can
+advance to launch.
 
 ## Stopping the Simulation
 

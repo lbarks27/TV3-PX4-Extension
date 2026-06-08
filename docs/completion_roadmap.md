@@ -242,7 +242,7 @@ Gate A: single-engine ascent free flight
   - Gazebo ascent response
   - TVC command sanity
   - abort/reset command verification
-  - launch-day checklist
+  - launch-day software workflow: [hardware_flight_workflow.md](hardware_flight_workflow.md)
 
 Gate B: three-engine restrained/tethered lander tests
 

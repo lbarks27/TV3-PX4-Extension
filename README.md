@@ -5,7 +5,7 @@ Out-of-tree PX4 modules, uORB messages, and tooling for thrust-vector-controlled
 - Single-engine TVC ascent vehicle (`tv3_v1`)
 - Three-engine splay-throttle lander vehicle (`tv3_lander_v1`)
 
-Designed for `EXTERNAL_MODULES_LOCATION` builds against PX4 v1.16.1. Vehicle manifests in `config/vehicles/` drive generated SITL assets, runtime payloads, and motor reference data.
+Designed for `EXTERNAL_MODULES_LOCATION` builds against PX4 v1.16.1. Vehicle manifests in `config/vehicles/` drive generated SIH/SITL runtime payloads, JSBSim assets, and motor reference data.
 Flight profiles in `config/flight_profiles/` define scenario targets that can be loaded on top of those vehicle manifests for SITL runs.
 
 ## Documentation
@@ -21,16 +21,16 @@ Flight profiles in `config/flight_profiles/` define scenario targets that can be
 ./scripts/check_barebones.sh      # run tests + generate bare-bones assets
 ./scripts/bootstrap_px4.sh        # clone PX4 into ../vendor/px4 (first time)
 ./scripts/prepare_px4_tree.sh     # one-time: create patched worktree + overlays
-./scripts/build_sitl.sh           # initial SITL build
+./scripts/build_sih.sh            # initial PX4 SIH SITL build
 
-# After first setup, use the fast path for daily runs:
-./scripts/run_sitl_gazebo_fast.sh
+# Default validation gate:
+./scripts/run_sitl_sih.sh
 ```
 
 Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml`.
 Load a flight scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml`.
 
-See [docs/simulation.md](docs/simulation.md) for the full reproducible workflow, how to connect QGC, and why the fast launcher is preferred after initial setup.
+See [docs/simulation.md](docs/simulation.md) for the full reproducible workflow, QGC/Hawkeye ports, and scenario command runner behavior.
 
 ## Status & Roadmap
 

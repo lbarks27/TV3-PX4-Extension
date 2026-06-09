@@ -123,6 +123,12 @@ The Fly View action list should then include:
 - `TV3 Abort`
 - `TV3 Reset`
 
+Do not remap QGC's generic `Takeoff` button to rocket ignition. The TV3
+hardware and SIH paths intentionally use the same explicit `TV3 Launch` action
+so the operator sees a rocket-specific command with `Abort` and `Reset` nearby.
+The launch action is valid for sim and hardware only after the normal arming,
+state-machine, range, and pad-safety checks pass.
+
 These actions send `MAV_CMD_USER_1` command `31010`:
 
 | Action | `param1` | PX4 shell equivalent |

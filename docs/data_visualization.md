@@ -24,7 +24,7 @@ build/barebones/runtime/etc/logging/logger_topics.txt
 build/barebones/runtime/fs/microsd/etc/logging/logger_topics.txt
 ```
 
-PX4 reads `etc/logging/logger_topics.txt` from its storage directory at boot. The Gazebo launch scripts call `scripts/sync_sitl_logger_topics.sh`, which copies the generated profile into:
+PX4 reads `etc/logging/logger_topics.txt` from its storage directory at boot. The SIH launcher calls `scripts/sync_sitl_logger_topics.sh`, which copies the generated profile into:
 
 ```text
 ../.work/px4-tv3/build/px4_sitl_default/rootfs/etc/logging/logger_topics.txt
@@ -60,18 +60,18 @@ SITL first writes PX4 ULogs to the local PX4 rootfs:
 ../.work/px4-tv3/build/px4_sitl_default/rootfs/log/YYYY-MM-DD/HH_MM_SS.ulg
 ```
 
-`scripts/run_sitl_gazebo_fast.sh` and `scripts/run_sitl_gazebo.sh` archive new logs automatically on exit:
+`scripts/run_sitl_sih.sh` archives new logs automatically on exit:
 
 ```text
 logs/sim/YYYY-MM-DD/<run-id>/
 ```
 
-Each archive directory includes copied `.ulg` files plus `manifest.txt`; SITL archives also include `logger_topics.txt`, `model.sdf`, and `vehicle.yaml` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
+Each archive directory includes copied `.ulg` files plus `manifest.txt`; SITL archives also include `logger_topics.txt`, `flight_profile.yaml`, and `vehicle.yaml` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
 
 Use a stable run ID when you want a predictable folder name:
 
 ```bash
-TV3_LOG_RUN_ID=lander-smoke-001 ./scripts/run_sitl_gazebo_fast.sh
+TV3_LOG_RUN_ID=lander-smoke-001 ./scripts/run_sitl_sih.sh
 ```
 
 Archive flight-hardware or ground-test logs copied from QGroundControl, an SD card, or another source with:
@@ -86,7 +86,7 @@ Archive flight-hardware or ground-test logs copied from QGroundControl, an SD ca
 Run the sim normally, then plot the newest archived ULog:
 
 ```bash
-./scripts/run_sitl_gazebo_fast.sh
+./scripts/run_sitl_sih.sh
 ./scripts/plot_ulog.sh --latest
 ```
 
@@ -110,13 +110,15 @@ To see what a log actually contains:
 
 If a panel says a topic is missing, the log was probably recorded before the TV3 profile was synced, or that module did not publish during the run. Start a new run after the sync step and check again.
 
-## Gazebo Transport
+## SIH And Hawkeye
 
-For simulator-owned truth data, use Gazebo Transport separately from ULog:
+For simulator-owned truth data, prefer ULog topics emitted by `tv3_sih`:
 
-```bash
-gz topic -l
-gz topic -e -t /world/default/pose/info
+```text
+vehicle_attitude_groundtruth
+vehicle_angular_velocity_groundtruth
+vehicle_local_position_groundtruth
+vehicle_global_position_groundtruth
 ```
 
-Use this path for world/model poses, link states, contacts, and Gazebo sensor streams. Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 rocket module outputs.
+Hawkeye is a viewer on UDP `19410`; it is not the physics source of truth. Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 rocket module outputs.

@@ -6,7 +6,7 @@ For the full from-current-state-to-flight-ready plan, see `docs/completion_roadm
 
 ## Product Intent
 
-TV3 is an out-of-tree PX4 extension for thrust-vector-controlled solid-motor rockets. The intended product is not a standalone flight app; it is a set of PX4 modules, uORB topics, vehicle definitions, ROMFS overlays, Gazebo plugins, and host-side generators that let selected vehicle manifests drive SITL, hardware runtime assets, and motor-reference data.
+TV3 is an out-of-tree PX4 extension for thrust-vector-controlled solid-motor rockets. The intended product is not a standalone flight app; it is a set of PX4 modules, uORB topics, vehicle definitions, ROMFS overlays, SIH simulation modules, and host-side generators that let selected vehicle manifests drive SITL, hardware runtime assets, and motor-reference data.
 
 The core loop is:
 
@@ -26,7 +26,7 @@ The repo now defaults to the smallest useful launch/boost slice:
 - Verified locally: motor catalog normalization, vehicle asset generation, and generated `RK_*` parameter names matching firmware definitions.
 - Generated runtime and simulation assets live under `build/`; tracked runtime files are limited to SD-card startup templates.
 
-This gives us a narrow product we can reason about: configure a rocket, load motor data, arm, command launch/abort/reset, detect ignition/burnout, and publish TVC-relevant setpoints. The current repo also includes a three-engine lander manifest, per-engine propulsion state plumbing, a first Gazebo rocket physics plugin, and a host allocator helper; those are the starting point for the completion roadmap.
+This gives us a narrow product we can reason about: configure a rocket, load motor data, arm, command launch/abort/reset, detect ignition/burnout, and publish TVC-relevant setpoints. The current repo also includes a three-engine lander manifest, per-engine propulsion state plumbing, the `tv3_sih` simulation module, and a host allocator helper; those are the starting point for the completion roadmap.
 
 ## Phase Gates
 
@@ -52,7 +52,7 @@ Phase 3: Guidance re-entry
 Phase 4: PX4 allocator and SITL fidelity
 
 - Refresh the PX4 patch against the selected PX4 tag.
-- Run Gazebo and JSBSim asset generation from the same vehicle YAML.
+- Run SIH and JSBSim asset generation from the same vehicle YAML.
 - Verify TVC actuator outputs under expected and measured thrust changes.
 
 Phase 5: Hardware readiness

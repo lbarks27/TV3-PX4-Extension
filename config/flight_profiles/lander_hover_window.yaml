@@ -4,7 +4,7 @@ description: Short local hover-window scenario for the three-engine lander.
 vehicle: tv3_lander_v1
 scenario:
   type: hover_window
-  simulator: gz
+  simulator: sih
   intent: Hold a small local target long enough to review force response, allocator saturation, and guidance margin.
   simulated_only: true
 guidance:
@@ -37,7 +37,7 @@ guidance:
 mission_profile:
   first_free_flight_gate: single_engine_ascent
   required_sim_gates:
-    - gazebo_force_response
+    - sih_force_response
     - hover_window
     - allocator_saturation_review
 commands:
@@ -46,6 +46,7 @@ commands:
   - at_s: 1.0
     action: launch
 review:
+  min_hover_s: 3.0
   required_topics:
     - rocket_guidance_status
     - trajectory_setpoint

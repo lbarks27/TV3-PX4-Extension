@@ -4,7 +4,7 @@ description: Nominal waypoint-track and landing-approach scenario for tv3_lander
 vehicle: tv3_lander_v1
 scenario:
   type: waypoint_track
-  simulator: gz
+  simulator: sih
   intent: Exercise launch, waypoint track, hover/descend, and landing approach in one deterministic run.
   simulated_only: true
 guidance:
@@ -36,7 +36,7 @@ guidance:
 mission_profile:
   first_free_flight_gate: single_engine_ascent
   required_sim_gates:
-    - gazebo_force_response
+    - sih_force_response
     - load_cell_confirmed_sequence
     - waypoint_track
     - landing_approach

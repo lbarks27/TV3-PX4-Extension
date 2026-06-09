@@ -1,26 +1,11 @@
-# TV3 v1 Gazebo CAD Visuals
+# TV3 v1 CAD References
 
-Drop renderable Gazebo visual meshes for `tv3_v1` in this directory.
+Store TV3 v1 CAD source files and exported render meshes here.
 
-Gazebo does not render STEP files directly. Keep STEP files as source CAD references only, and export visual meshes as one of:
+Active SIH runs do not consume visual meshes. Future visual adapters should use
+the vehicle reference frame declared in `config/vehicles/tv3_v1.yaml`: origin at
+nozzle exit center, +X forward along the airframe, +Y vehicle right, and +Z
+vehicle down.
 
-- `.glb`
-- `.gltf`
-- `.dae`
-- `.obj`
-- `.stl`
-
-The `tv3_v1` manifest is configured as CAD-only for vehicle structure. If a mesh listed in `config/vehicles/tv3_v1.yaml` is missing, the generator omits that visual instead of drawing a procedural fallback.
-
-Expected first-pass files:
-
-- `tv3_v1_static_structure.glb`: fixed airframe, nose, fins, avionics, and fixed TVC housing. Exclude moving nozzle/TVC geometry if separate animation should be visible.
-- `tv3_v1_engine_nozzle.glb`: moving nozzle/TVC visual named `engine_nozzle_0`.
-
-Mesh frame expectations:
-
-- Use the vehicle reference frame declared in the manifest: origin at nozzle exit center, +X forward along the airframe, +Y vehicle right, +Z vehicle down.
-- Static structure mesh origin should match the vehicle reference origin and use an identity pose in the manifest.
-- Nozzle mesh origin should be at the TVC pivot, with local +X along the thrust axis.
-
-The procedural `thrust_cue_0` visual is not vehicle structure. It remains as a command-driven flame cue for future thrust visualization.
+Historical Gazebo-specific mesh naming guidance lives in
+`deprecated/sim/gazebo/assets/cad/tv3_v1/README.md`.

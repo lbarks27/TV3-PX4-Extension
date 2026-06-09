@@ -1,48 +1,5 @@
 name: tv3_v1
 description: Swerve Vector Control single-motor TVC rocket baseline for PX4 v1.
-gazebo:
-  model_name: tv3_rocket
-  include_tv3_plugin: false
-  visual_model:
-    mode: cad_only
-    mesh_policy: omit_unavailable
-    notes:
-      - Vehicle structure is CAD-only; missing renderable meshes are omitted instead of replaced with primitives.
-      - Gazebo cannot render STEP directly; use GLB, GLTF, DAE, OBJ, or STL visual meshes.
-      - Keep the animated TVC/nozzle mesh named engine_nozzle_0 for future command-driven visualization.
-    orientation_axes:
-      enabled: true
-      length_m: 0.38
-      shaft_radius_m: 0.008
-      head_length_m: 0.08
-      head_radius_m: 0.025
-    joint_markers:
-      enabled: true
-      physical_joints: true
-      engine_pivots: false
-      radius_m: 0.024
-      axis_length_m: 0.18
-      axis_radius_m: 0.006
-    visuals:
-      - name: tv3_static_structure
-        kind: mesh
-        mesh_uri: assets/cad/tv3_v1/tv3_v1_static_structure.glb
-        pose_m: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.82, 0.84, 0.82, 1.0]
-      - name: engine_nozzle_0
-        kind: mesh
-        mesh_uri: assets/cad/tv3_v1/tv3_v1_engine_nozzle.glb
-        pose_m: [0.02, 0.0, 0.0, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.08, 0.08, 0.09, 1.0]
-      - name: thrust_cue_0
-        kind: cylinder
-        pose_m: [0.15, 0.0, 0.0, 0.0, 0.0, 0.0]
-        radius_m: 0.018
-        length_m: 0.01
-        color_rgba: [1.0, 0.34, 0.02, 0.35]
-        cast_shadows: false
 hardware:
   autopilot: cube_orange_plus
   carrier: mini_carrier
@@ -87,7 +44,7 @@ physical_model:
   notes:
     - TVC CAD and inertias are provisional until measured mating frames, COM offsets, and joint axes are captured.
     - Base vehicle mass/inertia excludes the swerve axis and thrust joint moving links.
-    - STEP sources are copied into generated Gazebo assets as CAD references; convert to mesh formats before visual rendering.
+    - STEP sources remain CAD references; visual simulator adapters should convert them into renderable mesh formats outside the active generator.
   assemblies:
     - id: base_vehicle_without_tvc_moving_links
       total_mass_kg: 1.0

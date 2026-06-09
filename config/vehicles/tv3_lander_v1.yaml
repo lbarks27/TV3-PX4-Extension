@@ -1,86 +1,8 @@
 name: tv3_lander_v1
-description: TV3 three-engine splay-throttle landing vehicle for Gazebo validation.
+description: TV3 three-engine splay-throttle landing vehicle for PX4 SIH validation.
 variant:
   role: three_engine_lander
   first_free_flight_gate: false
-gazebo:
-  model_name: tv3_lander
-  include_tv3_plugin: true
-  reference_thrust_n: 55.0
-  thrust_axis_frame: world
-  thrust_axis_world: [0.0, 0.0, 1.0]
-  apply_engine_torques: false
-  commanded_thrust: true
-  command_timeout_s: 0.25
-  command_scale: 0.07333333333333333
-  force_application_m: [0.72, 0.0, 0.0]
-  ignition_delay_s: 0.0
-  visual_model:
-    mode: cad_only
-    mesh_policy: omit_unavailable
-    notes:
-      - Vehicle structure is CAD-only; missing renderable meshes are omitted instead of replaced with primitives.
-      - Gazebo cannot render STEP directly; use GLB, GLTF, DAE, OBJ, or STL visual meshes.
-      - Keep animated nozzle meshes named engine_nozzle_0, engine_nozzle_1, and engine_nozzle_2.
-    orientation_axes:
-      enabled: true
-      length_m: 0.32
-      shaft_radius_m: 0.008
-      head_length_m: 0.07
-      head_radius_m: 0.024
-    joint_markers:
-      enabled: true
-      physical_joints: true
-      engine_pivots: true
-      radius_m: 0.022
-      axis_length_m: 0.16
-      axis_radius_m: 0.006
-    visuals:
-      - name: lander_static_structure
-        kind: mesh
-        mesh_uri: assets/cad/lander/tv3_lander_static_structure.glb
-        pose_m: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.78, 0.82, 0.80, 1.0]
-      - name: engine_nozzle_0
-        kind: mesh
-        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
-        pose_m: [0.12, 0.12, 0.0, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.06, 0.06, 0.07, 1.0]
-      - name: thrust_cue_0
-        kind: cylinder
-        pose_m: [0.12, 0.12, 0.0, 0.0, 0.0, 0.0]
-        radius_m: 0.016
-        length_m: 0.01
-        color_rgba: [1.0, 0.34, 0.02, 0.35]
-        cast_shadows: false
-      - name: engine_nozzle_1
-        kind: mesh
-        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
-        pose_m: [0.12, -0.06, 0.103923, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.06, 0.06, 0.07, 1.0]
-      - name: thrust_cue_1
-        kind: cylinder
-        pose_m: [0.12, -0.06, 0.103923, 0.0, 0.0, 0.0]
-        radius_m: 0.016
-        length_m: 0.01
-        color_rgba: [1.0, 0.34, 0.02, 0.35]
-        cast_shadows: false
-      - name: engine_nozzle_2
-        kind: mesh
-        mesh_uri: assets/cad/lander/tv3_lander_engine_nozzle.glb
-        pose_m: [0.12, -0.06, -0.103923, 0.0, 0.0, 0.0]
-        mesh_scale: [1.0, 1.0, 1.0]
-        color_rgba: [0.06, 0.06, 0.07, 1.0]
-      - name: thrust_cue_2
-        kind: cylinder
-        pose_m: [0.12, -0.06, -0.103923, 0.0, 0.0, 0.0]
-        radius_m: 0.016
-        length_m: 0.01
-        color_rgba: [1.0, 0.34, 0.02, 0.35]
-        cast_shadows: false
 hardware:
   autopilot: cube_orange_plus
   carrier: mini_carrier
@@ -251,7 +173,7 @@ guidance:
 mission_profile:
   first_free_flight_gate: single_engine_ascent
   required_sim_gates:
-    - gazebo_force_response
+    - sih_force_response
     - load_cell_confirmed_sequence
     - hover_window
     - waypoint_track

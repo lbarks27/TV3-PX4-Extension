@@ -37,8 +37,8 @@ TV3_FLIGHT_PROFILE=config/flight_profiles/lander_waypoint_track.yaml \
 
 Today the generator applies the profile's `guidance` block to generated PX4
 `RK_GD_*` params and overlays `mission_profile` metadata for traceability.
-Command timelines, environment settings, faults, and review metrics are defined
-in the profile files now, but they are not executed automatically yet.
+`scripts/run_sitl_sih.sh` starts `scripts/run_profile_commands.py` by default,
+which executes profile command timelines such as arm and launch over MAVLink.
 
 ## Current Starter Profiles
 

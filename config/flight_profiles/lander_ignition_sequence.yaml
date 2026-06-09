@@ -4,7 +4,7 @@ description: Three-engine ignition and load-cell confirmation smoke scenario.
 vehicle: tv3_lander_v1
 scenario:
   type: ignition_sequence
-  simulator: gz
+  simulator: sih
   intent: Prove ordered engine ignition, dwell timing, and confirmed thrust before hover or waypoint demands.
   simulated_only: true
 guidance:
@@ -36,7 +36,7 @@ guidance:
 mission_profile:
   first_free_flight_gate: single_engine_ascent
   required_sim_gates:
-    - gazebo_force_response
+    - sih_force_response
     - load_cell_confirmed_sequence
 commands:
   - at_s: 0.0

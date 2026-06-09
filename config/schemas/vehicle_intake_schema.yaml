@@ -2,7 +2,7 @@ schema: tv3_vehicle_intake_v1
 description: >
   Measured-data intake contract for TV3 vehicle manifests. These fields are
   intentionally explicit so physical parameters can be refreshed from measured
-  tables before they are trusted by PX4, Gazebo, or bench procedures.
+  tables before they are trusted by PX4 SIH, Hawkeye review, or bench procedures.
 required_sections:
   - vehicle
   - hardware
@@ -37,13 +37,11 @@ physical_model:
     - kinematic tree of fixed and moving links
     - local poses, COMs, masses, inertia tensors, and parent joints
     - moving TVC joint axes, limits, effort, velocity, damping, and friction
-gazebo:
+sih:
   optional:
-    - visual_model for visual-only SDF primitives, renderable mesh hooks, or CAD-only visual meshes
-    - visual_model mesh_policy may be fallback, omit_unavailable, or require_renderable
-    - visual_model orientation_axes may enable COM-pinned body-frame X/Y/Z arrow aids
-    - visual_model joint_markers may enable visual markers for physical_model joints and engine pivots
-    - visual_model entries must not add mass, collisions, or physics joints
+    - deterministic force-response constants that override manifest geometry for SIH-only studies
+    - viewer hints for Hawkeye or another MAVLink visualization client
+    - scenario-only perturbations that must not change measured hardware fields
 mission_profile:
   required:
     - first allowed free-flight gate

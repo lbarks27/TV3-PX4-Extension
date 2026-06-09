@@ -1,13 +1,47 @@
+# PX4 worktree, vendor clone, generated runtime FS
 .work/
 vendor/
 runtime/nuttx/fs/
+
+# Build outputs and dist
 build/
 dist/
+
+# Deprecated (Gazebo etc) - do not commit
+deprecated/
+depricated/  # catch common typo
+
+# Local tooling / AI assistants / editors (user-specific)
+.grok/
 .vscode/
-build_sitl.log
+.idea/
+
+# Python / test artifacts
 __pycache__/
 .pytest_cache/
 *.pyc
 *.pyo
 *.swp
+*.swo
+
+# OS junk
 .DS_Store
+Thumbs.db
+
+# Stray / temp at root
+build_sitl.log
+empty
+
+# Simulation and flight logs (large binary + session data)
+# Keep logs/ structure, README, and .gitignore committed via selective ignores
+logs/sim/
+logs/flight/
+logs/ground/
+logs/hawkeye/
+logs/live/
+# allow the explanatory files at logs root
+!logs/README.md
+!logs/.gitignore
+
+# Generic logs (but not inside allowed subdirs)
+*.log

@@ -17,7 +17,8 @@ Options:
   --archive-root PATH     Archive root. Defaults to <repo>/logs.
   --run-id ID             Run/test identifier. Defaults to UTC timestamp + kind.
   --vehicle-config PATH   Vehicle manifest to copy beside the logs.
-  --worktree PATH         PX4 SITL worktree; copies logger profile and spawned SDF when present.
+  --worktree PATH         PX4 SITL worktree; copies logger profile when present.
+  --simulator NAME        Simulator name written to manifest.txt.
   TV3_FLIGHT_PROFILE      Optional env var copied beside archived logs when set.
   --since-marker PATH     Only archive .ulg files newer than this marker file.
   --notes TEXT            Short notes written to manifest.txt.
@@ -35,6 +36,7 @@ RUN_ID="${TV3_LOG_RUN_ID:-}"
 VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-}"
 FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-}"
 WORKTREE=""
+SIMULATOR="${TV3_SIMULATOR:-${PX4_SIMULATOR:-}}"
 SINCE_MARKER=""
 NOTES=""
 
@@ -62,6 +64,10 @@ while [ "$#" -gt 0 ]; do
 			;;
 		--worktree)
 			WORKTREE="${2:?missing value for --worktree}"
+			shift 2
+			;;
+		--simulator)
+			SIMULATOR="${2:?missing value for --simulator}"
 			shift 2
 			;;
 		--since-marker)
@@ -171,7 +177,6 @@ fi
 
 if [ -n "${WORKTREE}" ] && [ -d "${WORKTREE}" ]; then
 	PX4_BUILD_DIR="${WORKTREE}/build/px4_sitl_default"
-	SPAWNED_SDF="${WORKTREE}/Tools/simulation/gz/models/tv3_rocket/model.sdf"
 	for LOGGER_PROFILE in \
 		"${PX4_BUILD_DIR}/etc/logging/logger_topics.txt" \
 		"${PX4_BUILD_DIR}/rootfs/etc/logging/logger_topics.txt"
@@ -181,9 +186,6 @@ if [ -n "${WORKTREE}" ] && [ -d "${WORKTREE}" ]; then
 			break
 		fi
 	done
-	if [ -f "${SPAWNED_SDF}" ]; then
-		cp -p "${SPAWNED_SDF}" "${RUN_DIR}/model.sdf"
-	fi
 fi
 
 GENERATED_LOGGER_PROFILE="${REPO_ROOT}/build/barebones/runtime/etc/logging/logger_topics.txt"
@@ -201,8 +203,11 @@ fi
 	echo "vehicle_config: ${VEHICLE_CONFIG}"
 	echo "flight_profile: ${FLIGHT_PROFILE}"
 	echo "worktree: ${WORKTREE}"
+	echo "simulator: ${SIMULATOR}"
 	echo "px4_sys_autostart: ${PX4_SYS_AUTOSTART:-}"
-	echo "px4_gz_world: ${PX4_GZ_WORLD:-}"
+	echo "px4_simulator: ${PX4_SIMULATOR:-}"
+	echo "px4_sim_model: ${PX4_SIM_MODEL:-}"
+	echo "hawkeye_udp_port: ${HAWKEYE_UDP_PORT:-19410}"
 	echo "tv3_motor_root: ${TV3_MOTOR_ROOT:-}"
 	echo "log_count: ${#LOGS[@]}"
 	if [ -n "${NOTES}" ]; then

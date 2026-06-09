@@ -120,55 +120,7 @@ class VehicleAssetTests(unittest.TestCase):
                 ).exists()
             )
 
-            model_config = (output / "gazebo" / "tv3_v1" / "model.config").read_text()
-            self.assertIn("<name>tv3_rocket</name>", model_config)
-
-            model_sdf = (output / "gazebo" / "tv3_v1" / "model.sdf").read_text()
-            self.assertIn('<model name="tv3_rocket">', model_sdf)
-            self.assertIn('<link name="base_link">', model_sdf)
-            self.assertIn("<mass>1.0</mass>", model_sdf)
-            self.assertIn("<ixx>0.14435</ixx>", model_sdf)
-            self.assertIn('<visual name="center_of_mass_marker">', model_sdf)
-            self.assertIn("CAD mesh unavailable for assets/cad/tv3_v1/tv3_v1_static_structure.glb", model_sdf)
-            self.assertIn("visual tv3_static_structure omitted", model_sdf)
-            self.assertIn("CAD mesh unavailable for assets/cad/tv3_v1/tv3_v1_engine_nozzle.glb", model_sdf)
-            self.assertIn("visual engine_nozzle_0 omitted", model_sdf)
-            self.assertNotIn('<visual name="body_shell">', model_sdf)
-            self.assertNotIn('<visual name="nose_cone">', model_sdf)
-            self.assertNotIn('<visual name="aft_tvc_housing">', model_sdf)
-            self.assertNotIn('<visual name="engine_nozzle_0">', model_sdf)
-            self.assertNotIn('<visual name="fin_top">', model_sdf)
-            self.assertIn('<visual name="thrust_cue_0">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_x_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_x_head">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_y_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_y_head">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_z_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_z_head">', model_sdf)
-            self.assertIn("<pose>0.0 0.15 0.0 -1.57079632679 0.0 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.0 0.0 0.15 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn('<visual name="joint_marker_tvc_pitch_axis_origin">', model_sdf)
-            self.assertIn('<visual name="joint_axis_tvc_pitch_axis">', model_sdf)
-            self.assertIn('<visual name="joint_marker_tvc_yaw_axis_origin">', model_sdf)
-            self.assertIn('<visual name="joint_axis_tvc_yaw_axis">', model_sdf)
-            self.assertIn("<pose>0.0 0.0 0.09 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertNotIn('<visual name="engine_pivot_marker_0">', model_sdf)
-            self.assertEqual(1, model_sdf.count('<visual name="thrust_cue_0">'))
-            self.assertEqual(1, model_sdf.count("visual tv3_static_structure omitted"))
-            self.assertIn("<sphere>", model_sdf)
-            self.assertIn("<radius>0.04</radius>", model_sdf)
-            self.assertIn('<collision name="body_contact_collision">', model_sdf)
-            self.assertEqual(1, model_sdf.count("<collision name="))
-            self.assertIn("<radius>0.12</radius>", model_sdf)
-            self.assertIn("<mass>0.2</mass>", model_sdf)
-            self.assertIn('<sensor name="imu_sensor" type="imu">', model_sdf)
-            self.assertIn('<joint name="tvc_pitch_axis" type="revolute">', model_sdf)
-            self.assertIn("<parent>base_link</parent>", model_sdf)
-            self.assertNotIn("tvc_mount_fixed", model_sdf)
-            self.assertNotIn("libtv3_rocket_gz.so", model_sdf)
-            self.assertTrue((output / "gazebo" / "tv3_v1" / "cad" / "swerve_vector_control_v4.step").exists())
-            cad_manifest = (output / "gazebo" / "tv3_v1" / "cad_sources.yaml").read_text()
-            self.assertIn("swerve_axis_v2.step", cad_manifest)
+            self.assertFalse((output / "gazebo").exists())
 
             jsbsim = (output / "jsbsim" / "tv3_v1" / "propulsion_motor.xml").read_text()
             self.assertIn('<engine id="engine_0">', jsbsim)
@@ -200,127 +152,10 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertEqual(3, len(rows))
             self.assertEqual(["0", "1", "2"], [row["motor_index"] for row in rows])
 
-            model_sdf = (output / "gazebo" / "tv3_lander_v1" / "model.sdf").read_text()
-            self.assertIn('filename="libtv3_rocket_gz.so"', model_sdf)
-            self.assertIn('<plugin name="tv3::Tv3RocketSystem" filename="libtv3_rocket_gz.so">', model_sdf)
-            self.assertIn("<reference_thrust_n>55.0</reference_thrust_n>", model_sdf)
-            self.assertIn("<thrust_axis_frame>world</thrust_axis_frame>", model_sdf)
-            self.assertIn("<apply_engine_torques>false</apply_engine_torques>", model_sdf)
-            self.assertIn("<commanded_thrust>true</commanded_thrust>", model_sdf)
-            self.assertIn("<command_timeout_s>0.25</command_timeout_s>", model_sdf)
-            self.assertIn("<command_scale>0.07333333333333333</command_scale>", model_sdf)
-            self.assertIn("<force_application_m>0.72 0.0 0.0</force_application_m>", model_sdf)
-            self.assertIn("<ignition_delay_s>0.0</ignition_delay_s>", model_sdf)
-            self.assertIn("<burn_duration_s>15.0</burn_duration_s>", model_sdf)
-            self.assertIn("<mass>3.85</mass>", model_sdf)
-            self.assertIn("<air_pressure>", model_sdf)
-            self.assertIn("<magnetometer>", model_sdf)
-            self.assertIn("<imu>", model_sdf)
-            self.assertIn("<pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.72 0.0 0.0 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn('<visual name="center_of_mass_marker">', model_sdf)
-            self.assertIn("CAD mesh unavailable for assets/cad/lander/tv3_lander_static_structure.glb", model_sdf)
-            self.assertIn("visual lander_static_structure omitted", model_sdf)
-            self.assertIn("CAD mesh unavailable for assets/cad/lander/tv3_lander_engine_nozzle.glb", model_sdf)
-            self.assertIn("visual engine_nozzle_0 omitted", model_sdf)
-            self.assertNotIn('<visual name="lander_core">', model_sdf)
-            self.assertNotIn('<visual name="avionics_deck">', model_sdf)
-            self.assertNotIn('<visual name="engine_pod_0">', model_sdf)
-            self.assertNotIn('<visual name="engine_nozzle_0">', model_sdf)
-            self.assertIn('<visual name="thrust_cue_0">', model_sdf)
-            self.assertNotIn('<visual name="engine_pod_1">', model_sdf)
-            self.assertNotIn('<visual name="engine_nozzle_1">', model_sdf)
-            self.assertIn('<visual name="thrust_cue_1">', model_sdf)
-            self.assertNotIn('<visual name="engine_pod_2">', model_sdf)
-            self.assertNotIn('<visual name="engine_nozzle_2">', model_sdf)
-            self.assertIn('<visual name="thrust_cue_2">', model_sdf)
-            self.assertNotIn('<visual name="landing_leg_0">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_x_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_x_head">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_y_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_y_head">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_z_shaft">', model_sdf)
-            self.assertIn('<visual name="orientation_axis_z_head">', model_sdf)
-            self.assertIn("<pose>0.845 0.0 0.0 0.0 1.57079632679 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.72 0.125 0.0 -1.57079632679 0.0 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.72 0.0 0.125 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn('<visual name="engine_pivot_marker_0">', model_sdf)
-            self.assertIn('<visual name="engine_pivot_thrust_axis_0">', model_sdf)
-            self.assertIn('<visual name="engine_pivot_marker_1">', model_sdf)
-            self.assertIn('<visual name="engine_pivot_thrust_axis_1">', model_sdf)
-            self.assertIn('<visual name="engine_pivot_marker_2">', model_sdf)
-            self.assertIn('<visual name="engine_pivot_thrust_axis_2">', model_sdf)
-            self.assertIn("<pose>0.12 0.12 0.08 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.12 -0.06 0.183923 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertIn("<pose>0.12 -0.06 -0.023923 0.0 0.0 0.0</pose>", model_sdf)
-            self.assertNotIn("<pose>0.2 0.12 0.0 0.0 1.57079632679 0.0</pose>", model_sdf)
-            self.assertEqual(16, model_sdf.count("<visual name="))
-            self.assertIn('<collision name="body_contact_collision">', model_sdf)
-            self.assertEqual(1, model_sdf.count("<collision name="))
-            self.assertIn("<engine_count>3</engine_count>", model_sdf)
-            self.assertIn("<ignition_sequence>0 1 2</ignition_sequence>", model_sdf)
-            self.assertEqual(3, model_sdf.count("<thrust_axis>0.0 0.0 1.0</thrust_axis>"))
-            self.assertEqual(3, model_sdf.count("<engine index="))
+            self.assertFalse((output / "gazebo").exists())
 
             jsbsim = (output / "jsbsim" / "tv3_lander_v1" / "propulsion_motor.xml").read_text()
             self.assertIn('<engine id="engine_2">', jsbsim)
-
-    def test_gazebo_visual_model_copies_renderable_meshes(self) -> None:
-        module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = yaml.safe_load(Path("config/vehicles/tv3_v1.yaml").read_text())
-
-        with TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            mesh = tmp_path / "probe.stl"
-            mesh.write_text("solid probe\nendsolid probe\n")
-            vehicle["gazebo"]["visual_model"] = {
-                "mesh_policy": "omit_unavailable",
-                "visuals": [
-                    {
-                        "name": "mesh_probe",
-                        "kind": "mesh",
-                        "mesh_uri": str(mesh),
-                        "mesh_scale": [1.0, 2.0, 3.0],
-                        "pose_m": [0.0, 0.0, 0.0],
-                        "color_rgba": [0.4, 0.5, 0.6, 1.0],
-                    }
-                ]
-            }
-            manifest = tmp_path / "vehicle.yaml"
-            manifest.write_text(yaml.safe_dump(vehicle, sort_keys=False))
-            output = tmp_path / "generated"
-
-            module.generate_assets(manifest, output)
-
-            model_sdf = (output / "gazebo" / "tv3_v1" / "model.sdf").read_text()
-            self.assertIn('<visual name="mesh_probe">', model_sdf)
-            self.assertIn("<mesh>", model_sdf)
-            self.assertIn("<uri>meshes/probe.stl</uri>", model_sdf)
-            self.assertIn("<scale>1.0 2.0 3.0</scale>", model_sdf)
-            self.assertTrue((output / "gazebo" / "tv3_v1" / "meshes" / "probe.stl").exists())
-
-    def test_gazebo_visual_model_require_renderable_meshes_rejects_missing_assets(self) -> None:
-        module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = yaml.safe_load(Path("config/vehicles/tv3_v1.yaml").read_text())
-
-        with TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            vehicle["gazebo"]["visual_model"] = {
-                "mesh_policy": "require_renderable",
-                "visuals": [
-                    {
-                        "name": "missing_mesh_probe",
-                        "kind": "mesh",
-                        "mesh_uri": str(tmp_path / "missing.glb"),
-                        "pose_m": [0.0, 0.0, 0.0],
-                    }
-                ],
-            }
-            manifest = tmp_path / "vehicle.yaml"
-            manifest.write_text(yaml.safe_dump(vehicle, sort_keys=False))
-
-            with self.assertRaises(FileNotFoundError):
-                module.generate_assets(manifest, tmp_path / "generated")
 
     def test_flight_profile_overlay_generates_guidance_params(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
@@ -391,9 +226,10 @@ class VehicleAssetTests(unittest.TestCase):
         self.assertIn("param set-default RK_LC_SRC 1", common)
         self.assertNotIn("rocket_guidance start", common)
 
-        gz = Path("overlay/ROMFS/init.d-posix/airframes/11000_gz_tv3_rocket").read_text()
-        self.assertIn(". ${R}etc/init.d-posix/airframes/tv3_rocket_common.inc", gz)
-        self.assertIn("PX4_SIMULATOR=${PX4_SIMULATOR:=gz}", gz)
+        sih = Path("overlay/ROMFS/init.d-posix/airframes/11002_tv3_lander").read_text()
+        self.assertIn(". ${R}etc/init.d-posix/airframes/tv3_rocket_common.inc", sih)
+        self.assertIn("PX4_SIMULATOR=${PX4_SIMULATOR:=sihsim}", sih)
+        self.assertIn("PX4_SIM_MODEL=${PX4_SIM_MODEL:=tv3_lander}", sih)
 
         jsbsim = Path("overlay/ROMFS/init.d-posix/airframes/11001_jsbsim_tv3_rocket").read_text()
         self.assertIn(". ${R}etc/init.d-posix/airframes/tv3_rocket_common.inc", jsbsim)

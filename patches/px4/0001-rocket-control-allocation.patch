@@ -765,7 +765,6 @@ index 7d7ed1d8a4..0000000000 100644
 +	rc.tv3_rocket_defaults
 +
 +	px4-rc.simulator
-+	px4-rc.gzsim
 +	px4-rc.jmavsim
 +	px4-rc.sihsim
 +	px4-rc.mavlink

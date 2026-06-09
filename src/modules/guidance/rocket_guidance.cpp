@@ -260,6 +260,21 @@ private:
 		_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
 	}
 
+	bool hover_window_lateral_target(Vector3f &target) const
+	{
+		const Vector3f &wp1 = _mission_waypoints[0].position;
+		const Vector3f &wp2 = _mission_waypoints[1].position;
+		const Vector3f &wp3 = _mission_waypoints[2].position;
+
+		if (fabsf(wp1(0) - wp2(0)) < 0.1f && fabsf(wp2(0) - wp3(0)) < 0.1f
+		    && fabsf(wp1(1) - wp2(1)) < 0.1f && fabsf(wp2(1) - wp3(1)) < 0.1f) {
+			target = Vector3f{wp2(0), wp2(1), 0.f};
+			return true;
+		}
+
+		return false;
+	}
+
 	static bool finite_position(const vehicle_local_position_s &position)
 	{
 		return PX4_ISFINITE(position.x) && PX4_ISFINITE(position.y) && PX4_ISFINITE(position.z)
@@ -370,8 +385,20 @@ private:
 
 			_phase = rocket_guidance_status_s::PHASE_LAUNCH_ASCENT;
 			_mission_started = true;
-			_last_target = _origin + Vector3f{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
-			_last_velocity_sp = Vector3f{0.f, 0.f, -math::max(_max_climb_rate_m_s, 1.f)};
+			Vector3f ascent_target{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
+			Vector3f lateral_target{};
+
+			if (hover_window_lateral_target(lateral_target)) {
+				ascent_target(0) = lateral_target(0);
+				ascent_target(1) = lateral_target(1);
+			}
+
+			_last_target = _origin + ascent_target;
+			const Vector3f error = _last_target - position;
+			const float distance = error.norm();
+			const float speed = math::constrain(distance * _position_gain, 0.f, _max_velocity_m_s);
+			_last_velocity_sp = distance > 1e-3f ? (error / distance) * speed : Vector3f{0.f, 0.f, 0.f};
+			_last_velocity_sp(2) = math::min(_last_velocity_sp(2), -math::max(_max_climb_rate_m_s, 1.f));
 			_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
 			return;
 		}

@@ -70,3 +70,10 @@ PARAM_DEFINE_FLOAT(RK_GD_LAND_N, 0.f);
 PARAM_DEFINE_FLOAT(RK_GD_LAND_E, 0.f);
 PARAM_DEFINE_FLOAT(RK_GD_LAND_D, 0.f);
 PARAM_DEFINE_INT32(RK_GD_SIM_GT, 0);
+
+// Inertia (diagonal, body frame) — consumed by SIH plant for rotational dynamics.
+// Not used by flight control allocation or guidance; provided so generated SITL assets
+// always match the declared parameter set and physical manifests can drive sim fidelity.
+PARAM_DEFINE_FLOAT(RK_IXX, 0.1f);
+PARAM_DEFINE_FLOAT(RK_IYY, 0.1f);
+PARAM_DEFINE_FLOAT(RK_IZZ, 0.01f);

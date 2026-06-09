@@ -1,0 +1,64 @@
+schema: tv3_flight_profile_v1
+name: lander_offset_hover_window
+description: Offset hover-window scenario for the three-engine lander.
+vehicle: tv3_lander_v1
+scenario:
+  type: hover_window
+  simulator: sih
+  intent: Translate to a hover point laterally offset from the launch point and hold it long enough to review guidance and SIH force response.
+  simulated_only: true
+guidance:
+  enable: 1
+  takeoff_alt_m: 8.0
+  apex_alt_m: 22.0
+  pos_p: 0.14
+  vel_max_m_s: 7.0
+  vel_up_m_s: 4.5
+  vel_dn_m_s: 3.0
+  yaw_deg: 0.0
+  hold_alt_m: 8.0
+  acceptance_m: 4.0
+  min_twr: 1.1
+  landing_twr: 1.2
+  min_remaining_impulse_ns: 0.0
+  wp1_n_m: 12.0
+  wp1_e_m: 6.0
+  wp1_d_m: -10.0
+  wp2_n_m: 12.0
+  wp2_e_m: 6.0
+  wp2_d_m: -8.0
+  wp3_n_m: 12.0
+  wp3_e_m: 6.0
+  wp3_d_m: -8.0
+  land_n_m: 0.0
+  land_e_m: 0.0
+  land_d_m: 0.0
+  sim_groundtruth_fallback: 1
+mission_profile:
+  first_free_flight_gate: single_engine_ascent
+  required_sim_gates:
+    - sih_force_response
+    - offset_hover_window
+    - allocator_saturation_review
+commands:
+  - at_s: 0.0
+    action: arm_and_ready
+  - at_s: 1.0
+    action: launch
+review:
+  target_hover_n_m: 12.0
+  target_hover_e_m: 6.0
+  target_hover_d_m: -8.0
+  min_hover_s: 3.0
+  required_topics:
+    - rocket_guidance_status
+    - trajectory_setpoint
+    - vehicle_local_position
+    - vehicle_local_position_groundtruth
+    - control_allocator_status
+    - actuator_motors
+    - rocket_engine_state
+  success_criteria:
+    - vehicle reaches the laterally offset hover target within acceptance_m
+    - position error stays within acceptance_m for min_hover_s
+    - allocator saturation is logged and bounded

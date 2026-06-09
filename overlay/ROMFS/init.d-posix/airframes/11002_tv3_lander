@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# @name TV3 Lander (SIH)
+# @type Rocket
+#
+
+. ${R}etc/init.d-posix/rc.tv3_rocket_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=sihsim}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=tv3_lander}
+
+param set-default SENS_EN_GPSSIM 1
+param set-default SENS_EN_BAROSIM 1
+param set-default SENS_EN_MAGSIM 1
+param set-default EKF2_EN 0
+param set-default ATT_EN 0
+
+. ${R}etc/init.d-posix/airframes/tv3_rocket_common.inc

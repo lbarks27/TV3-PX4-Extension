@@ -1,3 +1,8 @@
+if [ -f fs/microsd/tv3/airframes/active.params.sh ]
+then
+	. fs/microsd/tv3/airframes/active.params.sh
+fi
+
 control_allocator start
 rocket_motor_model start
 rocket_load_cell start

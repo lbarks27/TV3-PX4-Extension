@@ -1,5 +1,5 @@
 name: tv3_v1
-description: Swerve Vector Control single-motor TVC rocket baseline for PX4 v1.
+description: Swerve Vector Control single-motor TVC tv3 baseline for PX4 v1.
 hardware:
   autopilot: cube_orange_plus
   carrier: mini_carrier
@@ -13,11 +13,17 @@ hardware:
   load_cell:
     driver: ads1115
     source: 0
+    adc_instance: 1
     adc_channel: 0
+    negative_channel: 1
+    mode: differential
     calibration:
       tare: 0.0
       scale: 1.0
+      kg_per_count: 0.0
     alpha: 0.25
+    deadband_counts: 0.0
+    publish_rate_hz: 10
     timeout_ms: 200
 vehicle:
   body_mass_kg: 1.0

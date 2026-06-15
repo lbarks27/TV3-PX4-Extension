@@ -48,13 +48,13 @@ commands:
 review:
   min_hover_s: 3.0
   required_topics:
-    - rocket_guidance_status
+    - tv3_guidance_status
     - trajectory_setpoint
     - vehicle_local_position
     - vehicle_local_position_groundtruth
     - control_allocator_status
     - actuator_motors
-    - rocket_engine_state
+    - tv3_engine_state
   success_criteria:
     - position error stays within acceptance_m during the hover window
     - allocator saturation is logged and bounded

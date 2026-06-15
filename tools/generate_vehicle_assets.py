@@ -57,16 +57,16 @@ LOGGER_TOPICS = [
     ("vehicle_torque_setpoint", 50),
     ("vehicle_thrust_setpoint", 50),
     ("trajectory_setpoint", 50),
-    ("# TV3 rocket-specific review topics", None),
-    ("rocket_command", 0),
-    ("rocket_engine_command", 20),
-    ("rocket_engine_state", 20),
-    ("rocket_guidance_status", 20),
-    ("rocket_load_cell", 50),
-    ("rocket_mode_status", 20),
-    ("rocket_motor_reference", 20),
-    ("rocket_status", 20),
-    ("rocket_thrust", 20),
+    ("# TV3 tv3-specific review topics", None),
+    ("tv3_command", 0),
+    ("tv3_engine_command", 20),
+    ("tv3_engine_state", 20),
+    ("tv3_guidance_status", 20),
+    ("tv3_load_cell", 50),
+    ("tv3_mode_status", 20),
+    ("tv3_motor_reference", 20),
+    ("tv3_status", 20),
+    ("tv3_thrust", 20),
 ]
 
 
@@ -316,16 +316,25 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_TQ_Y_MAX", body["torque_limits_nm"]["yaw"], 9)
     append_param(lines, "RK_ATT_P_RAIL", controller["attitude_p"]["rail"], 9)
     append_param(lines, "RK_ATT_P_FREE", controller["attitude_p"]["free"], 9)
+    append_param(lines, "RK_ATT_P_BOOST", controller["attitude_p"].get("boost", controller["attitude_p"]["free"]), 9)
     append_param(lines, "RK_RATE_P_RAIL", controller["rate_p"]["rail"], 9)
     append_param(lines, "RK_RATE_P_FREE", controller["rate_p"]["free"], 9)
+    append_param(lines, "RK_RATE_P_BOOST", controller["rate_p"].get("boost", controller["rate_p"]["free"]), 9)
     append_param(lines, "RK_RATE_I", controller["rate_i"], 9)
     append_param(lines, "RK_RATE_D", controller["rate_d"], 9)
+    append_param(lines, "RK_INT_LIM_BOOST", controller.get("integrator_limit_boost", 15.0), 9)
     append_param(lines, "RK_LC_SRC", load_cell.get("source", 0), 6)
     append_param(lines, "RK_LC_CH", load_cell["adc_channel"], 6)
+    append_param(lines, "RK_LC_NEG_CH", load_cell.get("negative_channel", 1), 6)
+    append_param(lines, "RK_LC_ADC_INST", load_cell.get("adc_instance", 1), 6)
+    append_param(lines, "RK_LC_MODE", 1 if load_cell.get("mode", "single_ended") == "differential" else 0, 6)
     append_param(lines, "RK_LC_TARE", load_cell["calibration"]["tare"], 9)
     append_param(lines, "RK_LC_SCALE", load_cell["calibration"]["scale"], 9)
+    append_param(lines, "RK_LC_KG_SC", load_cell["calibration"].get("kg_per_count", 0.0), 9)
     append_param(lines, "RK_LC_ALPHA", load_cell.get("alpha", 0.25), 9)
+    append_param(lines, "RK_LC_DB", load_cell.get("deadband_counts", 0.0), 9)
     append_param(lines, "RK_LC_TO_MS", load_cell.get("timeout_ms", 200), 6)
+    append_param(lines, "RK_LC_RATE_HZ", load_cell.get("publish_rate_hz", 10), 6)
     append_param(lines, "RK_GD_ENABLE", g("enable", 0), 6)
     append_param(lines, "RK_GD_TAKE_ALT", g("takeoff_alt_m", 35.0), 9)
     append_param(lines, "RK_GD_APEX_ALT", g("apex_alt_m", 120.0), 9)
@@ -355,52 +364,6 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
-
-
-def write_jsbsim_assets(vehicle: dict, path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    engines = vehicle_engines(vehicle)
-    engine_lines = "\n".join(
-        f"""  <engine id="{engine['id']}">
-    <motor_index>{engine['motor_index']}</motor_index>
-  </engine>"""
-        for engine in engines
-    )
-
-    aircraft_xml = f"""<?xml version="1.0"?>
-<fdm_config name="{vehicle['name']}" version="2.0">
-  <metrics>
-    <wingarea unit="FT2">0.01</wingarea>
-    <wingspan unit="FT">0.1</wingspan>
-    <chord unit="FT">0.1</chord>
-  </metrics>
-  <mass_balance>
-    <emptywt unit="KG">{vehicle['vehicle']['body_mass_kg']}</emptywt>
-    <location name="CG" unit="M">
-      <x>{vehicle['vehicle']['body_com_x_m']}</x>
-      <y>0.0</y>
-      <z>0.0</z>
-    </location>
-  </mass_balance>
-</fdm_config>
-"""
-
-    propulsion_xml = f"""<?xml version="1.0"?>
-<propulsion>
-  <engine file="propulsion_motor.xml"/>
-</propulsion>
-"""
-
-    motor_xml = f"""<?xml version="1.0"?>
-<rocket_motor>
-  <catalog_root>{vehicle['motor_selection']['catalog_root']}</catalog_root>
-{engine_lines}
-</rocket_motor>
-"""
-
-    (path / "aircraft.xml").write_text(aircraft_xml)
-    (path / "propulsion.xml").write_text(propulsion_xml)
-    (path / "propulsion_motor.xml").write_text(motor_xml)
 
 
 def write_preliminary_motor_catalog(vehicle: dict, path: Path) -> None:
@@ -488,8 +451,8 @@ def write_runtime_assets(vehicle: dict, path: Path) -> None:
     (etc_path / "config.txt").write_text(config_text)
 
     extras_text = (REPO_ROOT / "runtime" / "nuttx" / "etc" / "extras.txt").read_text()
-    if vehicle.get("guidance", {}).get("enable", 0) and "rocket_guidance start" not in extras_text:
-        extras_text = extras_text.rstrip() + "\nrocket_guidance start\n"
+    if vehicle.get("guidance", {}).get("enable", 0) and "tv3_guidance start" not in extras_text:
+        extras_text = extras_text.rstrip() + "\ntv3_guidance start\n"
     (etc_path / "extras.txt").write_text(extras_text)
 
     write_px4_params(vehicle, airframe_path / f"{vehicle['name']}.params")
@@ -504,7 +467,6 @@ def generate_assets(vehicle_path: Path, output_root: Path, flight_profile_path: 
         vehicle = apply_flight_profile(vehicle, load_flight_profile(flight_profile_path), flight_profile_path)
     validate_vehicle(vehicle)
     write_runtime_assets(vehicle, output_root / "runtime")
-    write_jsbsim_assets(vehicle, output_root / "jsbsim" / vehicle["name"])
 
 
 def main() -> None:

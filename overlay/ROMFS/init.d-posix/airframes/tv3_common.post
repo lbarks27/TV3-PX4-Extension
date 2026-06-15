@@ -4,7 +4,7 @@ then
 fi
 
 control_allocator start
-rocket_motor_model start
-rocket_load_cell start
-rocket_mode_manager start
-rocket_att_control start
+tv3_motor_model start
+tv3_load_cell start
+tv3_mode_manager start
+tv3_att_control start

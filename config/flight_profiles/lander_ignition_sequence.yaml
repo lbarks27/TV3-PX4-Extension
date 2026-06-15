@@ -45,11 +45,11 @@ commands:
     action: launch
 review:
   required_topics:
-    - rocket_engine_command
-    - rocket_engine_state
-    - rocket_load_cell
-    - rocket_thrust
-    - rocket_mode_status
+    - tv3_engine_command
+    - tv3_engine_state
+    - tv3_load_cell
+    - tv3_thrust
+    - tv3_mode_status
   success_criteria:
     - engine ignition order matches the manifest sequence
     - no engine advances without load-cell confirmation

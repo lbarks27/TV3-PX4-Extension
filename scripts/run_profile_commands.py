@@ -14,8 +14,8 @@ from pymavlink import mavutil
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.yaml"
-ROCKET_COMMAND = 31010
-ROCKET_ACTIONS = {
+TV3_COMMAND = 31010
+TV3_ACTIONS = {
     "launch": 1.0,
     "abort": 2.0,
     "reset": 3.0,
@@ -97,12 +97,12 @@ def run_command(
                 time.sleep(1.0)
         return
 
-    if action in ROCKET_ACTIONS:
-        param1 = float(command.get("param1", ROCKET_ACTIONS[action]))
-        print(f"profile command: {action} -> {ROCKET_COMMAND} param1={param1:g}")
+    if action in TV3_ACTIONS:
+        param1 = float(command.get("param1", TV3_ACTIONS[action]))
+        print(f"profile command: {action} -> {TV3_COMMAND} param1={param1:g}")
         if not dry_run:
-            send_command(master, ROCKET_COMMAND, [param1])
-            print(f"  ack: {wait_ack(master, ROCKET_COMMAND, ack_timeout_s)}")
+            send_command(master, TV3_COMMAND, [param1])
+            print(f"  ack: {wait_ack(master, TV3_COMMAND, ack_timeout_s)}")
         return
 
     raise ValueError(f"unsupported profile action: {action}")

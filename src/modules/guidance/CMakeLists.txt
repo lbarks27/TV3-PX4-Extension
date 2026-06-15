@@ -1,6 +1,6 @@
 px4_add_module(
-	MODULE modules__rocket_guidance
-	MAIN rocket_guidance
+	MODULE modules__tv3_guidance
+	MAIN tv3_guidance
 	SRCS
-		rocket_guidance.cpp
+		tv3_guidance.cpp
 )

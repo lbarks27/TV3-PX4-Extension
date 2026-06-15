@@ -47,7 +47,7 @@ repo_root = Path(sys.argv[1])
 worktree = Path(sys.argv[2])
 vehicle_config = Path(sys.argv[3])
 flight_profile = Path(sys.argv[4]) if sys.argv[4] else None
-patch = (repo_root / "patches/px4/0001-rocket-control-allocation.patch").read_text()
+patch = (repo_root / "patches/px4/0001-tv3-control-allocation.patch").read_text()
 
 def write_text_if_changed(path: Path, text: str) -> None:
 	current = path.read_text() if path.exists() else None
@@ -71,14 +71,14 @@ def extract_added_file(patch_text: str, relative_path: str) -> str:
 module_yaml = worktree / "src/modules/control_allocator/module.yaml"
 text = module_yaml.read_text()
 
-text = text.replace("                15: Spacecraft 3D\n            default: 0\n", "                15: Spacecraft 3D\n                16: Rocket\n            default: 0\n", 1)
+text = text.replace("                15: Spacecraft 3D\n            default: 0\n", "                15: Spacecraft 3D\n                16: TV3\n            default: 0\n", 1)
 
-param_marker = "+        # rocket TVC\n"
-rocket_marker = "+            16: # Rocket\n"
+param_marker = "+        # tv3 TVC\n"
+tv3_marker = "+            16: # TV3\n"
 module_patch = patch.split("diff --git a/src/modules/control_allocator/module.yaml b/src/modules/control_allocator/module.yaml", 1)[1]
 module_patch = module_patch.split("--- a/src/modules/control_allocator/VehicleActuatorEffectiveness/apogee_f10_mass_curve.hpp", 1)[0]
-param_block_raw = module_patch.split(param_marker, 1)[1].split(rocket_marker, 1)[0]
-rocket_block_raw = module_patch.split(rocket_marker, 1)[1]
+param_block_raw = module_patch.split(param_marker, 1)[1].split(tv3_marker, 1)[0]
+tv3_block_raw = module_patch.split(tv3_marker, 1)[1]
 
 def strip_plus(block: str) -> str:
 	lines = []
@@ -88,14 +88,14 @@ def strip_plus(block: str) -> str:
 	return "\n".join(lines)
 
 param_block = strip_plus(param_block_raw).rstrip("\n")
-rocket_block = strip_plus(rocket_block_raw).rstrip("\n")
+tv3_block = strip_plus(tv3_block_raw).rstrip("\n")
 
-if "# rocket TVC" not in text:
+if "# tv3 TVC" not in text:
 	insert_at = text.index("        # Tilts\n")
 	text = text[:insert_at] + param_block + "\n\n" + text[insert_at:]
 
-if "16: # Rocket" not in text:
-	text = text.rstrip("\n") + "\n\n" + rocket_block + "\n"
+if "16: # TV3" not in text:
+	text = text.rstrip("\n") + "\n\n" + tv3_block + "\n"
 
 module_yaml.write_text(text)
 
@@ -106,33 +106,66 @@ if "case 31010:" not in commander_text:
 		"\tcase vehicle_command_s::VEHICLE_CMD_REQUEST_CAMERA_INFORMATION:\n"
 		"\t\t/* ignore commands that are handled by other parts of the system */\n",
 		"\tcase vehicle_command_s::VEHICLE_CMD_REQUEST_CAMERA_INFORMATION:\n"
-		"\tcase 31010: // MAV_CMD_USER_1, handled by rocket_mode when enabled\n"
+		"\tcase 31010: // MAV_CMD_USER_1, handled by tv3_mode when enabled\n"
 		"\t\t/* ignore commands that are handled by other parts of the system */\n",
 		1,
 	)
 	write_text_if_changed(commander, commander_text)
 
+mode_management = worktree / "src/modules/commander/ModeManagement.cpp"
+mode_management_text = mode_management.read_text()
+if "RK_ENABLE" not in mode_management_text:
+	if '#include <px4_platform_common/events.h>' in mode_management_text:
+		mode_management_text = mode_management_text.replace(
+			"#include <px4_platform_common/events.h>\n",
+			"#include <lib/parameters/param.h>\n"
+			"#include <px4_platform_common/events.h>\n",
+			1,
+		)
+	mode_management_text = mode_management_text.replace(
+		"\t\t}\n"
+		"\t}\n"
+		"}\n\n"
+		"#endif /* CONSTRAINED_FLASH */",
+		"\t\t}\n"
+		"\t}\n\n"
+		"\t// TV3 uses tv3_mode_manager for launch sequencing. Hide standard PX4 selectable\n"
+		"\t// modes from GCS menus when the ascent manager is enabled (RK_ENABLE=1).\n"
+		"\tparam_t rk_enable = param_find(\"RK_ENABLE\");\n\n"
+		"\tif (rk_enable != PARAM_INVALID) {\n"
+		"\t\tint32_t enabled = 0;\n\n"
+		"\t\tif (param_get(rk_enable, &enabled) == 0 && enabled > 0) {\n"
+		"\t\t\tvalid_nav_state_mask = (1u << vehicle_status_s::NAVIGATION_STATE_MANUAL);\n"
+		"\t\t\tcan_set_nav_state_mask = 0;\n"
+		"\t\t}\n"
+		"\t}\n"
+		"}\n\n"
+		"#endif /* CONSTRAINED_FLASH */",
+		1,
+	)
+	write_text_if_changed(mode_management, mode_management_text)
+
 control_allocator_hpp = worktree / "src/modules/control_allocator/ControlAllocator.hpp"
 control_allocator_hpp_text = control_allocator_hpp.read_text()
-if "#include <ActuatorEffectivenessRocket.hpp>" not in control_allocator_hpp_text:
+if "#include <ActuatorEffectivenessTV3.hpp>" not in control_allocator_hpp_text:
 	control_allocator_hpp_text = control_allocator_hpp_text.replace(
 		"#include <ActuatorEffectivenessHelicopterCoaxial.hpp>\n",
 		"#include <ActuatorEffectivenessHelicopterCoaxial.hpp>\n"
-		"#include <ActuatorEffectivenessRocket.hpp>\n",
+		"#include <ActuatorEffectivenessTV3.hpp>\n",
 		1,
 	)
-if "\t\tROCKET = 16," not in control_allocator_hpp_text:
+if "\t\tTV3 = 16," not in control_allocator_hpp_text:
 	control_allocator_hpp_text = control_allocator_hpp_text.replace(
 		"\t\tSPACECRAFT_3D = 14,\n",
 		"\t\tSPACECRAFT_3D = 14,\n"
-		"\t\tROCKET = 16,\n",
+		"\t\tTV3 = 16,\n",
 		1,
 	)
 write_text_if_changed(control_allocator_hpp, control_allocator_hpp_text)
 
 control_allocator_cpp = worktree / "src/modules/control_allocator/ControlAllocator.cpp"
 control_allocator_cpp_text = control_allocator_cpp.read_text()
-if "EffectivenessSource::ROCKET" not in control_allocator_cpp_text:
+if "EffectivenessSource::TV3" not in control_allocator_cpp_text:
 	control_allocator_cpp_text = control_allocator_cpp_text.replace(
 		"\t\tcase EffectivenessSource::SPACECRAFT_3D:\n"
 		"\t\t\t// spacecraft_allocation does allocation and publishes directly to actuator_motors topic\n"
@@ -141,8 +174,8 @@ if "EffectivenessSource::ROCKET" not in control_allocator_cpp_text:
 		"\t\tcase EffectivenessSource::SPACECRAFT_3D:\n"
 		"\t\t\t// spacecraft_allocation does allocation and publishes directly to actuator_motors topic\n"
 		"\t\t\tbreak;\n\n"
-		"\t\tcase EffectivenessSource::ROCKET:\n"
-		"\t\t\ttmp = new ActuatorEffectivenessRocket(this);\n"
+		"\t\tcase EffectivenessSource::TV3:\n"
+		"\t\t\ttmp = new ActuatorEffectivenessTV3(this);\n"
 		"\t\t\tbreak;\n\n"
 		"\t\tdefault:\n",
 		1,
@@ -151,21 +184,21 @@ if "EffectivenessSource::ROCKET" not in control_allocator_cpp_text:
 
 vehicle_effectiveness = worktree / "src/modules/control_allocator/VehicleActuatorEffectiveness"
 for relative_path in (
-	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.hpp",
-	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.cpp",
+	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.hpp",
+	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.cpp",
 ):
 	write_text_if_changed(worktree / relative_path, extract_added_file(patch, relative_path))
 
 vehicle_effectiveness_cmake = vehicle_effectiveness / "CMakeLists.txt"
 vehicle_effectiveness_cmake_text = vehicle_effectiveness_cmake.read_text()
-if "ActuatorEffectivenessRocket.cpp" not in vehicle_effectiveness_cmake_text:
+if "ActuatorEffectivenessTV3.cpp" not in vehicle_effectiveness_cmake_text:
 	vehicle_effectiveness_cmake_text = vehicle_effectiveness_cmake_text.replace(
 		"\tActuatorEffectivenessRoverAckermann.hpp\n"
 		"\tActuatorEffectivenessRoverAckermann.cpp\n",
 		"\tActuatorEffectivenessRoverAckermann.hpp\n"
 		"\tActuatorEffectivenessRoverAckermann.cpp\n"
-		"\tActuatorEffectivenessRocket.hpp\n"
-		"\tActuatorEffectivenessRocket.cpp\n",
+		"\tActuatorEffectivenessTV3.hpp\n"
+		"\tActuatorEffectivenessTV3.cpp\n",
 		1,
 	)
 	write_text_if_changed(vehicle_effectiveness_cmake, vehicle_effectiveness_cmake_text)
@@ -222,7 +255,7 @@ fi
 
 GENERATED_PARAM_FILE=$(find "${REPO_ROOT}/build/barebones/runtime/fs/microsd/tv3/airframes" -name '*.params' -print -quit 2>/dev/null || true)
 if [ -n "${GENERATED_PARAM_FILE}" ]; then
-	python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_rocket_common.post" <<'PY'
+	python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_common.post" <<'PY'
 from pathlib import Path
 import sys
 
@@ -236,20 +269,20 @@ for raw_line in params.read_text().splitlines():
 		break
 
 lines = post_path.read_text().splitlines()
-lines = [line for line in lines if line.strip() != "rocket_guidance start"]
+lines = [line for line in lines if line.strip() != "tv3_guidance start"]
 
 if guidance_enabled:
-    insert_after = "rocket_mode_manager start"
+    insert_after = "tv3_mode_manager start"
     try:
         index = lines.index(insert_after) + 1
     except ValueError:
         index = len(lines)
-    lines.insert(index, "rocket_guidance start")
+    lines.insert(index, "tv3_guidance start")
 
 post_path.write_text("\n".join(lines) + "\n")
 PY
 
-	python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_rocket_common.inc" <<'PY'
+	python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_common.inc" <<'PY'
 from pathlib import Path
 import sys
 

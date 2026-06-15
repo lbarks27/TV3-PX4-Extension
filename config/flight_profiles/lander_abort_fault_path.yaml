@@ -53,12 +53,12 @@ commands:
     action: launch
 review:
   required_topics:
-    - rocket_mode_status
-    - rocket_guidance_status
-    - rocket_engine_state
-    - rocket_load_cell
+    - tv3_mode_status
+    - tv3_guidance_status
+    - tv3_engine_state
+    - tv3_load_cell
     - vehicle_command_ack
   success_criteria:
     - fault injection is visible in the archived manifest or run notes
     - failed engine or stale load cell produces abort or no-solution status
-    - abort reason is visible in rocket_mode_status
+    - abort reason is visible in tv3_mode_status

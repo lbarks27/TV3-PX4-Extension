@@ -16,8 +16,9 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/rocket_engine_command.h>
-#include <uORB/topics/rocket_engine_state.h>
+#include <uORB/topics/tv3_engine_command.h>
+#include <uORB/topics/tv3_engine_state.h>
+#include <uORB/topics/tv3_guidance_status.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_global_position.h>
@@ -145,7 +146,7 @@ public:
 			PX4_WARN("%s", reason);
 		}
 
-		PRINT_MODULE_DESCRIPTION("Deterministic TV3 rocket Simulation-In-Hardware dynamics. "
+		PRINT_MODULE_DESCRIPTION("Deterministic TV3 tv3 Simulation-In-Hardware dynamics. "
 		"6DOF rigid-body plant driven by per-engine gimbaled thrust vectors (using CA_RK geometry), "
 		"variable mass, COM migration, and diagonal inertia from manifests.");
 		PRINT_MODULE_USAGE_NAME("tv3_sih", "simulation");
@@ -206,6 +207,7 @@ private:
 
 		_engine_state_sub.update(&_engine_state);
 		_engine_command_sub.update(&_engine_command);
+		_guidance_status_sub.update(&_guidance_status);
 
 		const hrt_abstime now = hrt_absolute_time();
 		const float dt = math::constrain((now - _last_update) * 1e-6f, 0.001f, 0.05f);
@@ -227,9 +229,9 @@ private:
 		_home_alt_m = get_param_float("SIH_LOC_H0", 488.0f);
 
 		// Load per-group geometry (positions relative to reference, axes, fractions, trims).
-		// These are the same CA_RK_G* params used by ActuatorEffectivenessRocket.
+		// These are the same CA_RK_G* params used by ActuatorEffectivenessTV3.
 		int32_t grp_cnt = get_param_int32("CA_RK_GRP_CNT", 0);
-		_num_groups = math::constrain(grp_cnt, 0, (int32_t)rocket_engine_command_s::MAX_ENGINES);
+		_num_groups = math::constrain(grp_cnt, 0, (int32_t)tv3_engine_command_s::MAX_ENGINES);
 
 		for (int i = 0; i < _num_groups; ++i) {
 			char buf[32];
@@ -269,7 +271,7 @@ private:
 	{
 		float mass = math::max(_body_mass_kg, 0.1f);
 		const int count = math::constrain(static_cast<int>(_engine_state.engine_count), 0,
-						  static_cast<int>(rocket_engine_state_s::MAX_ENGINES));
+						  static_cast<int>(tv3_engine_state_s::MAX_ENGINES));
 
 		for (int i = 0; i < count; ++i) {
 			if (PX4_ISFINITE(_engine_state.expected_motor_mass_kg[i])) {
@@ -288,11 +290,11 @@ private:
 		Vector3f weighted{_body_com_x_m, 0.f, 0.f};
 		float total = m;
 
-		const int neng = math::min(_num_groups, (int)rocket_engine_state_s::MAX_ENGINES);
+		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
 
 		for (int i = 0; i < neng; ++i) {
 			float mi = 0.f;
-			if (i < rocket_engine_state_s::MAX_ENGINES && PX4_ISFINITE(_engine_state.expected_motor_mass_kg[i])) {
+			if (i < tv3_engine_state_s::MAX_ENGINES && PX4_ISFINITE(_engine_state.expected_motor_mass_kg[i])) {
 				mi = math::max(_engine_state.expected_motor_mass_kg[i], 0.f);
 			}
 			if (mi > 1e-4f) {
@@ -311,7 +313,7 @@ private:
 	{
 		float thrust_n = 0.f;
 		const int count = math::constrain(static_cast<int>(_engine_state.engine_count), 0,
-						  static_cast<int>(rocket_engine_state_s::MAX_ENGINES));
+						  static_cast<int>(tv3_engine_state_s::MAX_ENGINES));
 
 		for (int i = 0; i < count; ++i) {
 			if ((_engine_state.active_mask & (1u << i)) == 0) {
@@ -337,16 +339,16 @@ private:
 	void step_dynamics(float dt)
 	{
 		const int command_count = math::constrain(static_cast<int>(_engine_command.engine_count), 0,
-							  static_cast<int>(rocket_engine_command_s::MAX_ENGINES));
+							  static_cast<int>(tv3_engine_command_s::MAX_ENGINES));
 
 		// Capture per-engine commands (deg -> rad). These drive individual thrust directions.
-		for (int i = 0; i < command_count && i < rocket_engine_command_s::MAX_ENGINES; ++i) {
+		for (int i = 0; i < command_count && i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = _engine_command.commanded_pitch_deg[i] * kDegToRad;
 			_cmd_yaw_rad[i]   = _engine_command.commanded_yaw_deg[i] * kDegToRad;
 			_cmd_splay_rad[i] = _engine_command.commanded_splay_deg[i] * kDegToRad;
 		}
 		// Zero any unused higher engines
-		for (int i = command_count; i < rocket_engine_command_s::MAX_ENGINES; ++i) {
+		for (int i = command_count; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = 0.f;
 			_cmd_yaw_rad[i] = 0.f;
 			_cmd_splay_rad[i] = 0.f;
@@ -357,7 +359,7 @@ private:
 		{
 			float slew_dps = get_param_float("RK_TVC_SLEW_DPS", 220.f);
 			float max_step = math::max(slew_dps * kDegToRad * math::max(dt, 0.001f), 0.f);
-			for (int i = 0; i < rocket_engine_command_s::MAX_ENGINES; ++i) {
+			for (int i = 0; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 				_applied_pitch_rad[i] = math::constrain(_cmd_pitch_rad[i],
 					_applied_pitch_rad[i] - max_step, _applied_pitch_rad[i] + max_step);
 				_applied_yaw_rad[i] = math::constrain(_cmd_yaw_rad[i],
@@ -371,13 +373,14 @@ private:
 		const float mass = vehicle_mass_kg();
 		const Vector3f com_b = current_com_body();
 
-		Vector3f force_b{0.f, 0.f, 0.f};
-		Vector3f tau_b{0.f, 0.f, 0.f};
+		Vector3f engine_force_b{0.f, 0.f, 0.f};
+		Vector3f engine_tau_b{0.f, 0.f, 0.f};
+		float total_engine_thrust_n{0.f};
 
-		const int neng = math::min(_num_groups, (int)rocket_engine_state_s::MAX_ENGINES);
+		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
 		for (int i = 0; i < neng; ++i) {
 			float thr = 0.f;
-			if (i < rocket_engine_state_s::MAX_ENGINES) {
+			if (i < tv3_engine_state_s::MAX_ENGINES) {
 				thr = _engine_state.filtered_thrust_n[i];
 				if (!PX4_ISFINITE(thr) || thr <= 0.f) {
 					thr = _engine_state.measured_thrust_n[i];
@@ -391,23 +394,42 @@ private:
 				continue;
 			}
 
+			total_engine_thrust_n += thr;
+
 			const Vector3f dir_b = engine_thrust_dir_body(i);
 			const Vector3f f_b = dir_b * thr;
-			force_b += f_b;
+			engine_force_b += f_b;
 
 			const Vector3f r_b = _groups[i].position - com_b;
-			tau_b += r_b.cross(f_b);
+			engine_tau_b += r_b.cross(f_b);
 		}
 
-		// Bridge from torque/thrust setpoints (produced by rocket_att_control + control allocator).
-		// The rocket_engine_command gimbal angles (pitch/yaw/splay) are currently not populated by
+		// Scale delivered engine thrust to guidance demand. Motor curves report full
+		// chamber thrust; guidance publishes the hover/ascent envelope as required_thrust_n.
+		float thrust_scale = 1.f;
+		const int32_t gd_enable = get_param_int32("RK_GD_ENABLE", 0);
+
+		if (gd_enable > 0) {
+			if (_guidance_status.timestamp > 0 && _guidance_status.thrust_solution_valid
+			    && _guidance_status.required_thrust_n > 0.f && total_engine_thrust_n > 1.f) {
+				thrust_scale = math::constrain(_guidance_status.required_thrust_n / total_engine_thrust_n, 0.f, 1.f);
+			} else if (total_engine_thrust_n > 1.f || _guidance_status.active) {
+				thrust_scale = 0.f;
+			}
+		}
+
+		Vector3f force_b = engine_force_b * thrust_scale;
+		Vector3f tau_b = engine_tau_b * thrust_scale;
+
+		// Bridge from torque/thrust setpoints (produced by tv3_att_control + control allocator).
+		// The tv3_engine_command gimbal angles (pitch/yaw/splay) are currently not populated by
 		// upper layers (only ignition fields are), so per-engine dir rotation produces no control
 		// torques. Directly realizing the requested body wrench here lets the attitude loop close
 		// in SIH, keeping the initial upright orientation (preventing "on its side" in Hawkeye)
 		// and yielding stable flight for validation scenarios.
 		{
 			bool have_gimbal_cmd = false;
-			for (int i = 0; i < rocket_engine_command_s::MAX_ENGINES; ++i) {
+			for (int i = 0; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 				if (fabsf(_applied_pitch_rad[i]) > 1e-4f || fabsf(_applied_yaw_rad[i]) > 1e-4f || fabsf(_applied_splay_rad[i]) > 1e-4f) {
 					have_gimbal_cmd = true;
 					break;
@@ -416,9 +438,13 @@ private:
 			if (!have_gimbal_cmd) {
 				vehicle_torque_setpoint_s t_sp{};
 				if (_torque_setpoint_sub.update(&t_sp)) {
-					tau_b(0) += t_sp.xyz[0];
-					tau_b(1) += t_sp.xyz[1];
-					tau_b(2) += t_sp.xyz[2];
+					_last_torque_setpoint = t_sp;
+				}
+
+				if (_last_torque_setpoint.timestamp > 0) {
+					tau_b(0) += _last_torque_setpoint.xyz[0];
+					tau_b(1) += _last_torque_setpoint.xyz[1];
+					tau_b(2) += _last_torque_setpoint.xyz[2];
 				}
 			}
 			// Thrust setpoint is a normalized axial command; the delivered magnitude and any
@@ -432,7 +458,7 @@ private:
 		const Vector3f g_world{0.f, 0.f, kGravityMps2};
 		Vector3f a_world = f_world / math::max(mass, 0.1f) + g_world;
 
-		// Rail constraint (kinematic lock + zero rates while on rail; use length + position as proxy for rocket_status.rail_exit)
+		// Rail constraint (kinematic lock + zero rates while on rail; use length + position as proxy for tv3_status.rail_exit)
 		const bool on_rail = (_rail_length_m > 0.f) && (-_position(2) < _rail_length_m);
 		if (on_rail) {
 			a_world(0) = 0.f;
@@ -470,7 +496,15 @@ private:
 				      _inertia_diag(1) * _omega_b(1),
 				      _inertia_diag(2) * _omega_b(2)};
 		const Vector3f omega_x_Iw = _omega_b.cross(Iomega);
-		const Vector3f tau_net = tau_b - omega_x_Iw;
+		// Light angular rate damping models TVC nozzle aerodynamic drag and keeps the
+		// SIH plant numerically tame when thrust-disturbance torques spike at ignition.
+		const float rate_damp_nm = get_param_float("RK_SIH_RATE_DAMP", 2.5f);
+		Vector3f tau_net = tau_b - omega_x_Iw;
+
+		if (!on_rail && rate_damp_nm > 0.f) {
+			tau_net -= _omega_b * rate_damp_nm;
+		}
+
 		const Vector3f alpha_b{_inertia_inv(0) * tau_net(0),
 				       _inertia_inv(1) * tau_net(1),
 				       _inertia_inv(2) * tau_net(2)};
@@ -587,8 +621,10 @@ private:
 		Vector3f _angular_velocity{};
 		Vector3f _specific_force{0.f, 0.f, -kGravityMps2};
 		Vector3f _euler{};
-	rocket_engine_state_s _engine_state{};
-	rocket_engine_command_s _engine_command{};
+	tv3_engine_state_s _engine_state{};
+	tv3_engine_command_s _engine_command{};
+	tv3_guidance_status_s _guidance_status{};
+	vehicle_torque_setpoint_s _last_torque_setpoint{};
 
 	// Proper 6DOF state (replaces puppet euler/attitude logic)
 	Quatf _att_q{AxisAnglef(Vector3f{0.f, 1.f, 0.f}, M_PI_F * 0.5f)};
@@ -599,18 +635,18 @@ private:
 	Vector3f _inertia_inv{1.f/0.144f, 1.f/0.144f, 1.f/0.010f};
 
 	// Geometry loaded from CA_RK_* params (matches allocator effectiveness model)
-	EngineGroup _groups[rocket_engine_command_s::MAX_ENGINES]{};
+	EngineGroup _groups[tv3_engine_command_s::MAX_ENGINES]{};
 	int _num_groups{0};
 
-	// Latest per-engine gimbal commands (from RocketEngineCommand). These are the "desired".
-	float _cmd_pitch_rad[rocket_engine_command_s::MAX_ENGINES]{};
-	float _cmd_yaw_rad[rocket_engine_command_s::MAX_ENGINES]{};
-	float _cmd_splay_rad[rocket_engine_command_s::MAX_ENGINES]{};
+	// Latest per-engine gimbal commands (from TV3EngineCommand). These are the "desired".
+	float _cmd_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _cmd_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _cmd_splay_rad[tv3_engine_command_s::MAX_ENGINES]{};
 
 	// Actually applied (rate-limited) angles used for thrust direction this tick. Provides basic actuator dynamics in plant.
-	float _applied_pitch_rad[rocket_engine_command_s::MAX_ENGINES]{};
-	float _applied_yaw_rad[rocket_engine_command_s::MAX_ENGINES]{};
-	float _applied_splay_rad[rocket_engine_command_s::MAX_ENGINES]{};
+	float _applied_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _applied_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _applied_splay_rad[tv3_engine_command_s::MAX_ENGINES]{};
 
 	// Compute body-frame unit thrust direction for one engine given its commands (includes trims).
 	// Rotations around the group axes produce the physical side-force components used for torque.
@@ -658,10 +694,11 @@ private:
 	PX4Gyroscope _px4_gyro{1310988};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
-	uORB::Subscription _engine_state_sub{ORB_ID(rocket_engine_state)};
-	uORB::Subscription _engine_command_sub{ORB_ID(rocket_engine_command)};
+	uORB::Subscription _engine_state_sub{ORB_ID(tv3_engine_state)};
+	uORB::Subscription _engine_command_sub{ORB_ID(tv3_engine_command)};
 	uORB::Subscription _torque_setpoint_sub{ORB_ID(vehicle_torque_setpoint)};
 	uORB::Subscription _thrust_setpoint_sub{ORB_ID(vehicle_thrust_setpoint)};
+	uORB::Subscription _guidance_status_sub{ORB_ID(tv3_guidance_status)};
 	uORB::Publication<vehicle_attitude_s> _attitude_pub{ORB_ID(vehicle_attitude)};
 	uORB::Publication<vehicle_attitude_s> _attitude_groundtruth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_angular_velocity_s> _angular_velocity_pub{ORB_ID(vehicle_angular_velocity)};

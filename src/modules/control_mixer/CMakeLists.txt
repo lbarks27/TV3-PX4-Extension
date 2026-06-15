@@ -1,6 +1,6 @@
 px4_add_module(
-	MODULE modules__rocket_att_control
-	MAIN rocket_att_control
+	MODULE modules__tv3_att_control
+	MAIN tv3_att_control
 	SRCS
-		rocket_att_control.cpp
+		tv3_att_control.cpp
 )

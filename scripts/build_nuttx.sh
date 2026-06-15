@@ -6,6 +6,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 TV3_ROOT=$(cd -- "${REPO_ROOT}/.." && pwd)
 WORKTREE=$("${SCRIPT_DIR}/prepare_px4_tree.sh")
+MODULES_LOCATION="${TV3_ROOT}/.work/tv3-px4-extension"
 TARGET="${1:-${PX4_NUTTX_TARGET:-}}"
 VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-${REPO_ROOT}/config/vehicles/tv3_v1.yaml}"
 
@@ -14,7 +15,9 @@ if [ -z "${TARGET}" ]; then
 	exit 1
 fi
 
-make -C "${WORKTREE}" "${TARGET}" EXTERNAL_MODULES_LOCATION="${REPO_ROOT}"
+ln -sfn "${REPO_ROOT}" "${MODULES_LOCATION}"
+
+make -C "${WORKTREE}" "${TARGET}" EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}"
 
 ASSET_ROOT="${REPO_ROOT}/build/nuttx/${TARGET}"
 rm -rf "${ASSET_ROOT}"

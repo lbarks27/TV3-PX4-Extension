@@ -20,15 +20,15 @@ REVIEW_TOPICS = [
     "control_allocator_status",
     "home_position",
     "internal_combustion_engine_control",
-    "rocket_command",
-    "rocket_engine_command",
-    "rocket_engine_state",
-    "rocket_guidance_status",
-    "rocket_load_cell",
-    "rocket_mode_status",
-    "rocket_motor_reference",
-    "rocket_status",
-    "rocket_thrust",
+    "tv3_command",
+    "tv3_engine_command",
+    "tv3_engine_state",
+    "tv3_guidance_status",
+    "tv3_load_cell",
+    "tv3_mode_status",
+    "tv3_motor_reference",
+    "tv3_status",
+    "tv3_thrust",
     "sensor_combined",
     "trajectory_setpoint",
     "vehicle_acceleration",
@@ -179,23 +179,23 @@ def build_figure(ulog, log_path: Path, show: bool):
     count += plotted(
         axes[0],
         datasets,
-        "rocket_status",
+        "tv3_status",
         [
-            ("rocket mode", ("mode",)),
+            ("tv3 mode", ("mode",)),
             ("rail distance m", ("rail_distance_m",)),
             ("burn fraction", ("burn_fraction",)),
         ],
         start_us,
     )
-    count += plotted(axes[0], datasets, "rocket_guidance_status", [("guidance phase", ("phase",))], start_us)
+    count += plotted(axes[0], datasets, "tv3_guidance_status", [("guidance phase", ("phase",))], start_us)
     if count == 0:
-        mark_empty(axes[0], "missing rocket_status / rocket_guidance_status")
+        mark_empty(axes[0], "missing tv3_status / tv3_guidance_status")
     finish_axis(axes[0], "mode/state")
 
     count = plotted(
         axes[1],
         datasets,
-        "rocket_thrust",
+        "tv3_thrust",
         [
             ("measured N", ("measured_thrust_n",)),
             ("filtered N", ("filtered_thrust_n",)),
@@ -206,7 +206,7 @@ def build_figure(ulog, log_path: Path, show: bool):
     count += plotted(
         axes[1],
         datasets,
-        "rocket_motor_reference",
+        "tv3_motor_reference",
         [
             ("reference N", ("expected_thrust_n",)),
             ("vehicle mass kg", ("expected_vehicle_mass_kg",)),
@@ -214,7 +214,7 @@ def build_figure(ulog, log_path: Path, show: bool):
         start_us,
     )
     if count == 0:
-        mark_empty(axes[1], "missing rocket_thrust / rocket_motor_reference")
+        mark_empty(axes[1], "missing tv3_thrust / tv3_motor_reference")
     finish_axis(axes[1], "thrust/mass")
 
     count = plotted(
@@ -287,7 +287,7 @@ def build_figure(ulog, log_path: Path, show: bool):
     count = plotted(
         axes[5],
         datasets,
-        "rocket_guidance_status",
+        "tv3_guidance_status",
         [
             ("target distance m", ("target_distance_m",)),
             ("thrust margin N", ("thrust_margin_n",)),
@@ -307,7 +307,7 @@ def build_figure(ulog, log_path: Path, show: bool):
         start_us,
     )
     if count == 0:
-        mark_empty(axes[5], "missing rocket_guidance_status / control_allocator_status")
+        mark_empty(axes[5], "missing tv3_guidance_status / control_allocator_status")
     finish_axis(axes[5], "margin/error")
     axes[5].set_xlabel("time since first logged sample (s)")
 

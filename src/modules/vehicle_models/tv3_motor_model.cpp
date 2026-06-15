@@ -10,9 +10,9 @@
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/rocket_engine_command.h>
-#include <uORB/topics/rocket_motor_reference.h>
-#include <uORB/topics/rocket_status.h>
+#include <uORB/topics/tv3_engine_command.h>
+#include <uORB/topics/tv3_motor_reference.h>
+#include <uORB/topics/tv3_status.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -165,10 +165,10 @@ static std::string join_path(const std::string &root, const std::string &relativ
 }
 } // namespace
 
-class RocketMotorModel : public ModuleBase<RocketMotorModel>, public ModuleParams, public px4::ScheduledWorkItem
+class TV3MotorModel : public ModuleBase<TV3MotorModel>, public ModuleParams, public px4::ScheduledWorkItem
 {
 public:
-	RocketMotorModel() :
+	TV3MotorModel() :
 		ModuleParams(nullptr),
 		ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers)
 	{
@@ -204,7 +204,7 @@ public:
 			}
 		}
 
-		RocketMotorModel *instance = new RocketMotorModel();
+		TV3MotorModel *instance = new TV3MotorModel();
 
 		if (instance == nullptr) {
 			PX4_ERR("alloc failed");
@@ -240,7 +240,7 @@ public:
 		}
 
 		PRINT_MODULE_DESCRIPTION("Loads normalized motor data from SD and publishes expected thrust and mass.");
-		PRINT_MODULE_USAGE_NAME("rocket_motor_model", "modules");
+		PRINT_MODULE_USAGE_NAME("tv3_motor_model", "modules");
 		PRINT_MODULE_USAGE_COMMAND("start");
 		PRINT_MODULE_USAGE_PARAM_STRING('d', nullptr, nullptr, "Motor root directory", true);
 		return 0;
@@ -509,16 +509,16 @@ private:
 
 	void update_status()
 	{
-		rocket_status_s status{};
+		tv3_status_s status{};
 
-			if (_rocket_status_sub.update(&status)) {
+			if (_tv3_status_sub.update(&status)) {
 				_status = status;
 			}
 
-			_rocket_engine_command_sub.update(&_engine_command);
+			_tv3_engine_command_sub.update(&_engine_command);
 
-			const bool status_should_burn = (_status.mode == rocket_status_s::MODE_IGNITION_PENDING
-							 || _status.mode == rocket_status_s::MODE_BOOST);
+			const bool status_should_burn = (_status.mode == tv3_status_s::MODE_IGNITION_PENDING
+							 || _status.mode == tv3_status_s::MODE_BOOST);
 
 			for (int i = 0; i < _engine_count; ++i) {
 				const uint8_t mask = static_cast<uint8_t>(1u << i);
@@ -578,7 +578,7 @@ private:
 
 	void publish_reference()
 	{
-			rocket_motor_reference_s ref{};
+			tv3_motor_reference_s ref{};
 			ref.timestamp = hrt_absolute_time();
 			ref.loaded = _motor_loaded;
 			ref.engine_count = static_cast<uint8_t>(_engine_count);
@@ -647,8 +647,8 @@ private:
 		MotorSpecs _specs{};
 		std::vector<CurvePoint> _curve{};
 		MotorSlot _engines[kMaxEngines]{};
-		rocket_status_s _status{};
-		rocket_engine_command_s _engine_command{};
+		tv3_status_s _status{};
+		tv3_engine_command_s _engine_command{};
 
 		param_t _param_motor_index{PARAM_INVALID};
 		param_t _param_engine_count{PARAM_INVALID};
@@ -657,12 +657,12 @@ private:
 		orb_id_t _param_parameter_update{};
 
 		uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
-		uORB::Subscription _rocket_engine_command_sub{ORB_ID(rocket_engine_command)};
-		uORB::Subscription _rocket_status_sub{ORB_ID(rocket_status)};
-	uORB::Publication<rocket_motor_reference_s> _ref_pub{ORB_ID(rocket_motor_reference)};
+		uORB::Subscription _tv3_engine_command_sub{ORB_ID(tv3_engine_command)};
+		uORB::Subscription _tv3_status_sub{ORB_ID(tv3_status)};
+	uORB::Publication<tv3_motor_reference_s> _ref_pub{ORB_ID(tv3_motor_reference)};
 };
 
-extern "C" __EXPORT int rocket_motor_model_main(int argc, char *argv[])
+extern "C" __EXPORT int tv3_motor_model_main(int argc, char *argv[])
 {
-	return RocketMotorModel::main(argc, argv);
+	return TV3MotorModel::main(argc, argv);
 }

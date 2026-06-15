@@ -5,7 +5,7 @@ index ead99ad3d6..00cc40b25e 100644
 @@ -1516,5 +1516,6 @@ Commander::handle_command(const vehicle_command_s &cmd)
  	case vehicle_command_s::VEHICLE_CMD_EXTERNAL_POSITION_ESTIMATE:
  	case vehicle_command_s::VEHICLE_CMD_REQUEST_CAMERA_INFORMATION:
-+	case 31010: // MAV_CMD_USER_1, handled by rocket_mode when enabled
++	case 31010: // MAV_CMD_USER_1, handled by tv3_mode when enabled
  		/* ignore commands that are handled by other parts of the system */
  		break;
  
@@ -22,8 +22,8 @@ index 17385a117c..38c2e74db7 100644
  			// spacecraft_allocation does allocation and publishes directly to actuator_motors topic
  			break;
  
-+		case EffectivenessSource::ROCKET:
-+			tmp = new ActuatorEffectivenessRocket(this);
++		case EffectivenessSource::TV3:
++			tmp = new ActuatorEffectivenessTV3(this);
 +			break;
 +
  		default:
@@ -38,14 +38,14 @@ index 02fe81529f..2372f5436f 100644
  #include <ActuatorEffectivenessUUV.hpp>
  #include <ActuatorEffectivenessHelicopter.hpp>
  #include <ActuatorEffectivenessHelicopterCoaxial.hpp>
-+#include <ActuatorEffectivenessRocket.hpp>
++#include <ActuatorEffectivenessTV3.hpp>
  
  #include <ControlAllocation.hpp>
 @@ -160,5 +160,6 @@ private:
  		HELICOPTER_COAXIAL = 12,
  		SPACECRAFT_2D = 13,
  		SPACECRAFT_3D = 14,
-+		ROCKET = 16,
++		TV3 = 16,
  	};
 
 diff --git a/src/modules/control_allocator/module.yaml b/src/modules/control_allocator/module.yaml
@@ -56,7 +56,7 @@ index 1790484347..2068e2c25a 100644
                  13: Rover (Mecanum)
                  14: Spacecraft 2D
                  15: Spacecraft 3D
-+                16: Rocket
++                16: TV3
              default: 0
  
          CA_METHOD:
@@ -64,10 +64,10 @@ index 1790484347..2068e2c25a 100644
              instance_start: 0
              default: 0
  
-+        # rocket TVC
++        # tv3 TVC
 +        CA_RK_GRP_CNT:
 +            description:
-+                short: Total number of rocket TVC groups
++                short: Total number of tv3 TVC groups
 +            type: enum
 +            values:
 +                0: '0'
@@ -78,7 +78,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0
 +        CA_RK_REF_THR:
 +            description:
-+                short: Rocket reference thrust
++                short: TV3 reference thrust
 +                long: |
 +                  Reference thrust used to build the normalized TVC effectiveness matrix.
 +                  At this thrust, a full-scale torque demand should correspond to a near full-scale
@@ -91,7 +91,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 20.0
 +        CA_RK_MIN_THR:
 +            description:
-+                short: Rocket minimum thrust estimate
++                short: TV3 minimum thrust estimate
 +                long: |
 +                  Minimum thrust used when scaling TVC authority from the measured thrust.
 +                  This prevents the allocator from dividing by near-zero thrust during ignition transients.
@@ -103,7 +103,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 5.0
 +        CA_RK_FAL_THR:
 +            description:
-+                short: Rocket fallback thrust
++                short: TV3 fallback thrust
 +                long: |
 +                  Fallback thrust used while the load cell is not yet valid, especially during ignition pending.
 +            type: float
@@ -114,7 +114,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 10.0
 +        CA_RK_BODY_M:
 +            description:
-+                short: Rocket static body mass
++                short: TV3 static body mass
 +                long: |
 +                  Airframe mass that does not burn away during boost. Use this together with the motor
 +                  mass and station parameters to compute the launch and in-flight center of mass.
@@ -126,7 +126,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_BODY_CMX:
 +            description:
-+                short: Rocket static body COM X
++                short: TV3 static body COM X
 +                long: Longitudinal center of mass of the non-burning airframe, referenced to the launch CG frame.
 +            type: float
 +            decimal: 3
@@ -136,7 +136,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_MOT_WET:
 +            description:
-+                short: Rocket motor wet mass
++                short: TV3 motor wet mass
 +                long: Loaded motor mass at ignition. The Apogee F10 defaults match the built-in mass curve.
 +            type: float
 +            decimal: 3
@@ -146,7 +146,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.084
 +        CA_RK_MOT_DRY:
 +            description:
-+                short: Rocket motor burnout mass
++                short: TV3 motor burnout mass
 +                long: Motor mass after the Apogee F10 propellant is consumed.
 +            type: float
 +            decimal: 3
@@ -156,7 +156,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.043
 +        CA_RK_MOT_CMX:
 +            description:
-+                short: Rocket motor COM X
++                short: TV3 motor COM X
 +                long: Longitudinal motor center of mass, referenced to the launch CG frame.
 +            type: float
 +            decimal: 3
@@ -166,7 +166,7 @@ index 1790484347..2068e2c25a 100644
 +            default: -0.25
 +        CA_RK_G${i}_PX:
 +            description:
-+                short: Rocket group ${i} X position relative to CG
++                short: TV3 group ${i} X position relative to CG
 +            type: float
 +            decimal: 3
 +            unit: m
@@ -177,7 +177,7 @@ index 1790484347..2068e2c25a 100644
 +            default: -0.25
 +        CA_RK_G${i}_PY:
 +            description:
-+                short: Rocket group ${i} Y position relative to CG
++                short: TV3 group ${i} Y position relative to CG
 +            type: float
 +            decimal: 3
 +            unit: m
@@ -188,7 +188,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_PZ:
 +            description:
-+                short: Rocket group ${i} Z position relative to CG
++                short: TV3 group ${i} Z position relative to CG
 +            type: float
 +            decimal: 3
 +            unit: m
@@ -199,7 +199,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_AX:
 +            description:
-+                short: Rocket group ${i} thrust axis X component
++                short: TV3 group ${i} thrust axis X component
 +                long: Only the direction is considered.
 +            type: float
 +            decimal: 2
@@ -210,7 +210,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 1.0
 +        CA_RK_G${i}_AY:
 +            description:
-+                short: Rocket group ${i} thrust axis Y component
++                short: TV3 group ${i} thrust axis Y component
 +                long: Only the direction is considered.
 +            type: float
 +            decimal: 2
@@ -221,7 +221,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_AZ:
 +            description:
-+                short: Rocket group ${i} thrust axis Z component
++                short: TV3 group ${i} thrust axis Z component
 +                long: Only the direction is considered.
 +            type: float
 +            decimal: 2
@@ -232,7 +232,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_PAX:
 +            description:
-+                short: Rocket group ${i} pitch-axis X component
++                short: TV3 group ${i} pitch-axis X component
 +                long: Gimbal rotation axis used by the pitch servo.
 +            type: float
 +            decimal: 2
@@ -243,7 +243,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_PAY:
 +            description:
-+                short: Rocket group ${i} pitch-axis Y component
++                short: TV3 group ${i} pitch-axis Y component
 +                long: Gimbal rotation axis used by the pitch servo.
 +            type: float
 +            decimal: 2
@@ -254,7 +254,7 @@ index 1790484347..2068e2c25a 100644
 +            default: -1.0
 +        CA_RK_G${i}_PAZ:
 +            description:
-+                short: Rocket group ${i} pitch-axis Z component
++                short: TV3 group ${i} pitch-axis Z component
 +                long: Gimbal rotation axis used by the pitch servo.
 +            type: float
 +            decimal: 2
@@ -265,7 +265,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_YAX:
 +            description:
-+                short: Rocket group ${i} yaw-axis X component
++                short: TV3 group ${i} yaw-axis X component
 +                long: Gimbal rotation axis used by the yaw servo.
 +            type: float
 +            decimal: 2
@@ -276,7 +276,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_YAY:
 +            description:
-+                short: Rocket group ${i} yaw-axis Y component
++                short: TV3 group ${i} yaw-axis Y component
 +                long: Gimbal rotation axis used by the yaw servo.
 +            type: float
 +            decimal: 2
@@ -287,7 +287,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_YAZ:
 +            description:
-+                short: Rocket group ${i} yaw-axis Z component
++                short: TV3 group ${i} yaw-axis Z component
 +                long: Gimbal rotation axis used by the yaw servo.
 +            type: float
 +            decimal: 2
@@ -298,7 +298,7 @@ index 1790484347..2068e2c25a 100644
 +            default: -1.0
 +        CA_RK_G${i}_PMAX:
 +            description:
-+                short: Rocket group ${i} pitch max gimbal angle
++                short: TV3 group ${i} pitch max gimbal angle
 +            type: float
 +            decimal: 1
 +            unit: deg
@@ -309,7 +309,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 5.0
 +        CA_RK_G${i}_YMAX:
 +            description:
-+                short: Rocket group ${i} yaw max gimbal angle
++                short: TV3 group ${i} yaw max gimbal angle
 +            type: float
 +            decimal: 1
 +            unit: deg
@@ -320,7 +320,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 5.0
 +        CA_RK_G${i}_TF:
 +            description:
-+                short: Rocket group ${i} thrust fraction
++                short: TV3 group ${i} thrust fraction
 +                long: Fraction of total thrust routed through this group.
 +            type: float
 +            decimal: 2
@@ -331,7 +331,7 @@ index 1790484347..2068e2c25a 100644
 +            default: [1.0, 0.0, 0.0, 0.0]
 +        CA_RK_G${i}_PTR:
 +            description:
-+                short: Rocket group ${i} pitch trim
++                short: TV3 group ${i} pitch trim
 +            type: float
 +            decimal: 2
 +            num_instances: 4
@@ -341,7 +341,7 @@ index 1790484347..2068e2c25a 100644
 +            default: 0.0
 +        CA_RK_G${i}_YTR:
 +            description:
-+                short: Rocket group ${i} yaw trim
++                short: TV3 group ${i} yaw trim
 +            type: float
 +            decimal: 2
 +            num_instances: 4
@@ -358,8 +358,8 @@ index 1790484347..2068e2c25a 100644
                            - name: 'CA_ROTOR${i}_CT'
                              label: "Thrust\nCoefficient"
 +
-+            16: # Rocket
-+                title: 'Rocket'
++            16: # TV3
++                title: 'TV3'
 +                actuators:
 +                  - actuator_type: 'servo'
 +                    group_label: 'TVC Groups'
@@ -431,7 +431,7 @@ index 1790484347..2068e2c25a 100644
 +#include <array>
 +#include <cstddef>
 +
-+struct RocketMassCurvePoint {
++struct TV3MassCurvePoint {
 +	float time_s;
 +	float motor_mass_kg;
 +};
@@ -441,35 +441,35 @@ index 1790484347..2068e2c25a 100644
 +inline constexpr float kApogeeF10LoadedMassKg = 0.084f;
 +inline constexpr float kApogeeF10SpentMassKg = 0.043f;
 +
-+inline constexpr std::array<RocketMassCurvePoint, 28> kApogeeF10MassCurve{{
-+	RocketMassCurvePoint{0.000000f, 0.084000f},
-+	RocketMassCurvePoint{0.015000f, 0.083886f},
-+	RocketMassCurvePoint{0.077000f, 0.082982f},
-+	RocketMassCurvePoint{0.201000f, 0.081283f},
-+	RocketMassCurvePoint{0.310000f, 0.079886f},
-+	RocketMassCurvePoint{0.464000f, 0.078108f},
-+	RocketMassCurvePoint{0.573000f, 0.076994f},
-+	RocketMassCurvePoint{0.789000f, 0.075024f},
-+	RocketMassCurvePoint{1.068000f, 0.072774f},
-+	RocketMassCurvePoint{1.393000f, 0.070455f},
-+	RocketMassCurvePoint{1.718000f, 0.068379f},
-+	RocketMassCurvePoint{2.166000f, 0.065852f},
-+	RocketMassCurvePoint{2.677000f, 0.063196f},
-+	RocketMassCurvePoint{3.311000f, 0.060011f},
-+	RocketMassCurvePoint{3.683000f, 0.058209f},
-+	RocketMassCurvePoint{3.791000f, 0.057671f},
-+	RocketMassCurvePoint{4.101000f, 0.056059f},
-+	RocketMassCurvePoint{4.658000f, 0.053188f},
-+	RocketMassCurvePoint{5.168000f, 0.050649f},
-+	RocketMassCurvePoint{5.725000f, 0.047950f},
-+	RocketMassCurvePoint{6.112000f, 0.046125f},
-+	RocketMassCurvePoint{6.329000f, 0.045112f},
-+	RocketMassCurvePoint{6.499000f, 0.044363f},
-+	RocketMassCurvePoint{6.685000f, 0.043699f},
-+	RocketMassCurvePoint{6.778000f, 0.043433f},
-+	RocketMassCurvePoint{6.917000f, 0.043151f},
-+	RocketMassCurvePoint{7.025000f, 0.043037f},
-+	RocketMassCurvePoint{7.130000f, 0.043000f},
++inline constexpr std::array<TV3MassCurvePoint, 28> kApogeeF10MassCurve{{
++	TV3MassCurvePoint{0.000000f, 0.084000f},
++	TV3MassCurvePoint{0.015000f, 0.083886f},
++	TV3MassCurvePoint{0.077000f, 0.082982f},
++	TV3MassCurvePoint{0.201000f, 0.081283f},
++	TV3MassCurvePoint{0.310000f, 0.079886f},
++	TV3MassCurvePoint{0.464000f, 0.078108f},
++	TV3MassCurvePoint{0.573000f, 0.076994f},
++	TV3MassCurvePoint{0.789000f, 0.075024f},
++	TV3MassCurvePoint{1.068000f, 0.072774f},
++	TV3MassCurvePoint{1.393000f, 0.070455f},
++	TV3MassCurvePoint{1.718000f, 0.068379f},
++	TV3MassCurvePoint{2.166000f, 0.065852f},
++	TV3MassCurvePoint{2.677000f, 0.063196f},
++	TV3MassCurvePoint{3.311000f, 0.060011f},
++	TV3MassCurvePoint{3.683000f, 0.058209f},
++	TV3MassCurvePoint{3.791000f, 0.057671f},
++	TV3MassCurvePoint{4.101000f, 0.056059f},
++	TV3MassCurvePoint{4.658000f, 0.053188f},
++	TV3MassCurvePoint{5.168000f, 0.050649f},
++	TV3MassCurvePoint{5.725000f, 0.047950f},
++	TV3MassCurvePoint{6.112000f, 0.046125f},
++	TV3MassCurvePoint{6.329000f, 0.045112f},
++	TV3MassCurvePoint{6.499000f, 0.044363f},
++	TV3MassCurvePoint{6.685000f, 0.043699f},
++	TV3MassCurvePoint{6.778000f, 0.043433f},
++	TV3MassCurvePoint{6.917000f, 0.043151f},
++	TV3MassCurvePoint{7.025000f, 0.043037f},
++	TV3MassCurvePoint{7.130000f, 0.043000f},
 +}};
 
 diff --git a/src/modules/control_allocator/VehicleActuatorEffectiveness/CMakeLists.txt b/src/modules/control_allocator/VehicleActuatorEffectiveness/CMakeLists.txt
@@ -483,17 +483,17 @@ index 7c6f2f8e51..0000000000 100644
  	ActuatorEffectivenessTailsitterVTOL.hpp
  	ActuatorEffectivenessRoverAckermann.hpp
  	ActuatorEffectivenessRoverAckermann.cpp
-+	ActuatorEffectivenessRocket.hpp
-+	ActuatorEffectivenessRocket.cpp
++	ActuatorEffectivenessTV3.hpp
++	ActuatorEffectivenessTV3.cpp
  	RpmControl.hpp
  	RpmControl.cpp
  )
 
-diff --git a/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.hpp b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.hpp
+diff --git a/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.hpp b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.hpp
 new file mode 100644
 index 0000000000..0000000000
 --- /dev/null
-+++ b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.hpp
++++ b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.hpp
 @@ -0,0 +1,92 @@
 +#pragma once
 +
@@ -501,17 +501,17 @@ index 0000000000..0000000000
 +
 +#include <px4_platform_common/module_params.h>
 +
-+class ActuatorEffectivenessRocket : public ModuleParams, public ActuatorEffectiveness
++class ActuatorEffectivenessTV3 : public ModuleParams, public ActuatorEffectiveness
 +{
 +public:
 +	static constexpr int MAX_GROUPS = 4;
 +
-+	explicit ActuatorEffectivenessRocket(ModuleParams *parent);
-+	~ActuatorEffectivenessRocket() override = default;
++	explicit ActuatorEffectivenessTV3(ModuleParams *parent);
++	~ActuatorEffectivenessTV3() override = default;
 +
 +	bool getEffectivenessMatrix(Configuration &configuration, EffectivenessUpdateReason external_update) override;
 +
-+	const char *name() const override { return "Rocket"; }
++	const char *name() const override { return "TV3"; }
 +
 +private:
 +	void updateParams() override;
@@ -565,15 +565,15 @@ index 0000000000..0000000000
 +	float _fallback_thrust{0.f};
 +};
 
-diff --git a/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.cpp b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.cpp
+diff --git a/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.cpp b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.cpp
 new file mode 100644
 index 0000000000..0000000000
 --- /dev/null
-+++ b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessRocket.cpp
++++ b/src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.cpp
 @@ -0,0 +1,165 @@
-+#include "ActuatorEffectivenessRocket.hpp"
++#include "ActuatorEffectivenessTV3.hpp"
 +
-+#include <cfloat>
++#include <float.h>
 +#include <cstdio>
 +
 +#include <lib/mathlib/mathlib.h>
@@ -581,7 +581,7 @@ index 0000000000..0000000000
 +
 +using namespace matrix;
 +
-+ActuatorEffectivenessRocket::ActuatorEffectivenessRocket(ModuleParams *parent)
++ActuatorEffectivenessTV3::ActuatorEffectivenessTV3(ModuleParams *parent)
 +	: ModuleParams(parent)
 +{
 +	for (int i = 0; i < MAX_GROUPS; ++i) {
@@ -635,7 +635,7 @@ index 0000000000..0000000000
 +	updateParams();
 +}
 +
-+void ActuatorEffectivenessRocket::updateParams()
++void ActuatorEffectivenessTV3::updateParams()
 +{
 +	ModuleParams::updateParams();
 +
@@ -692,7 +692,7 @@ index 0000000000..0000000000
 +	}
 +}
 +
-+Vector3f ActuatorEffectivenessRocket::normalizeOrDefault(const Vector3f &axis, const Vector3f &fallback)
++Vector3f ActuatorEffectivenessTV3::normalizeOrDefault(const Vector3f &axis, const Vector3f &fallback)
 +{
 +	const float norm = axis.norm();
 +
@@ -703,14 +703,14 @@ index 0000000000..0000000000
 +	return fallback;
 +}
 +
-+Vector3f ActuatorEffectivenessRocket::computeTorque(const Vector3f &lever_arm, const Vector3f &thrust_axis,
++Vector3f ActuatorEffectivenessTV3::computeTorque(const Vector3f &lever_arm, const Vector3f &thrust_axis,
 +		const Vector3f &gimbal_axis, float thrust_scale, float max_angle_rad)
 +{
 +	// Small-angle TVC linearization: delta thrust direction ~= gimbal_axis x thrust_axis.
 +	return thrust_scale * max_angle_rad * lever_arm.cross(gimbal_axis.cross(thrust_axis));
 +}
 +
-+bool ActuatorEffectivenessRocket::getEffectivenessMatrix(Configuration &configuration,
++bool ActuatorEffectivenessTV3::getEffectivenessMatrix(Configuration &configuration,
 +		EffectivenessUpdateReason external_update)
 +{
 +	if (external_update == EffectivenessUpdateReason::NO_EXTERNAL_UPDATE) {
@@ -720,7 +720,7 @@ index 0000000000..0000000000
 +	updateParams();
 +
 +	if (_count <= 0) {
-+		PX4_ERR("No rocket TVC groups configured");
++		PX4_ERR("No tv3 TVC groups configured");
 +		return false;
 +	}
 +
@@ -762,7 +762,7 @@ index 7d7ed1d8a4..0000000000 100644
 +px4_add_romfs_files(
 +	rcS
 +	rc.replay
-+	rc.tv3_rocket_defaults
++	rc.tv3_defaults
 +
 +	px4-rc.simulator
 +	px4-rc.jmavsim

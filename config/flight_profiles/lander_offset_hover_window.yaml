@@ -51,13 +51,13 @@ review:
   target_hover_d_m: -8.0
   min_hover_s: 3.0
   required_topics:
-    - rocket_guidance_status
+    - tv3_guidance_status
     - trajectory_setpoint
     - vehicle_local_position
     - vehicle_local_position_groundtruth
     - control_allocator_status
     - actuator_motors
-    - rocket_engine_state
+    - tv3_engine_state
   success_criteria:
     - vehicle reaches the laterally offset hover target within acceptance_m
     - position error stays within acceptance_m for min_hover_s

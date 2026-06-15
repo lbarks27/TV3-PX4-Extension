@@ -1,12 +1,12 @@
 set(config_msg_list_external
-	RocketCommand.msg
-	RocketStatus.msg
-	RocketThrust.msg
-	RocketMotorReference.msg
-	RocketEngineCommand.msg
-	RocketEngineState.msg
-	RocketModeStatus.msg
-	RocketGuidanceStatus.msg
-	RocketLoadCell.msg
+	Tv3Command.msg
+	Tv3Status.msg
+	Tv3Thrust.msg
+	Tv3MotorReference.msg
+	Tv3EngineCommand.msg
+	Tv3EngineState.msg
+	Tv3ModeStatus.msg
+	Tv3GuidanceStatus.msg
+	Tv3LoadCell.msg
 	PARENT_SCOPE
 )

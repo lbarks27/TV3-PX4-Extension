@@ -47,12 +47,12 @@ commands:
     action: launch
 review:
   required_topics:
-    - rocket_guidance_status
+    - tv3_guidance_status
     - trajectory_setpoint
     - vehicle_local_position
     - vehicle_attitude
-    - rocket_engine_command
-    - rocket_engine_state
+    - tv3_engine_command
+    - tv3_engine_state
   success_criteria:
     - all waypoints are reached within acceptance_m
     - landing approach begins only with sufficient landing_twr

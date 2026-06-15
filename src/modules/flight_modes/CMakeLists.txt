@@ -1,6 +1,6 @@
 px4_add_module(
-	MODULE modules__rocket_mode_manager
-	MAIN rocket_mode_manager
+	MODULE modules__tv3_mode_manager
+	MAIN tv3_mode_manager
 	SRCS
-		rocket_mode_manager.cpp
+		tv3_mode_manager.cpp
 )

@@ -1,9 +1,9 @@
 #!/bin/sh
 #
-# Shared defaults for TV3 rocket SITL profiles.
+# Shared defaults for TV3 SITL profiles.
 #
 
-set VEHICLE_TYPE rocket
+set VEHICLE_TYPE tv3
 
 param set-default MAV_TYPE 9
 param set-default COM_RC_IN_MODE 4

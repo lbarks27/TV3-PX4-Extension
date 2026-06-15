@@ -13,11 +13,11 @@ bool active
 bool armed
 bool origin_valid
 bool position_valid
-bool rocket_ready
-bool rocket_boosting
-bool rocket_coasting
+bool tv3_ready
+bool tv3_boosting
+bool tv3_coasting
 
-uint8 rocket_mode
+uint8 tv3_mode
 uint8 waypoint_index
 uint8 waypoint_count
 

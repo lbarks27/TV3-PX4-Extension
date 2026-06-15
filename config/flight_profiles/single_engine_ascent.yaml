@@ -47,9 +47,9 @@ commands:
     action: launch
 review:
   required_topics:
-    - rocket_status
-    - rocket_mode_status
-    - rocket_thrust
+    - tv3_status
+    - tv3_mode_status
+    - tv3_thrust
     - actuator_servos
     - vehicle_attitude
     - vehicle_local_position

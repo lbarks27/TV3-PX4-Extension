@@ -47,11 +47,11 @@ commands:
     action: launch
 review:
   required_topics:
-    - rocket_guidance_status
+    - tv3_guidance_status
     - trajectory_setpoint
     - vehicle_local_position
     - vehicle_local_position_groundtruth
-    - rocket_engine_state
+    - tv3_engine_state
     - control_allocator_status
     - actuator_motors
   success_criteria:

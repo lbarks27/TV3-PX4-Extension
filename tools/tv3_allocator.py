@@ -168,7 +168,7 @@ def engines_from_vehicle(vehicle: dict) -> list[EngineGeometry]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Coarse TV3 rocket allocator reachability check")
+    parser = argparse.ArgumentParser(description="Coarse TV3 tv3 allocator reachability check")
     parser.add_argument("--vehicle", type=Path, required=True)
     parser.add_argument("--torque", nargs=3, type=float, default=(0.0, 0.0, 0.0))
     parser.add_argument("--thrust", type=float, required=True)

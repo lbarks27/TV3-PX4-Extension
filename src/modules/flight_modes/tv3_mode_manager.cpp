@@ -13,12 +13,12 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/internal_combustion_engine_control.h>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/rocket_command.h>
-#include <uORB/topics/rocket_engine_command.h>
-#include <uORB/topics/rocket_engine_state.h>
-#include <uORB/topics/rocket_mode_status.h>
-#include <uORB/topics/rocket_status.h>
-#include <uORB/topics/rocket_thrust.h>
+#include <uORB/topics/tv3_command.h>
+#include <uORB/topics/tv3_engine_command.h>
+#include <uORB/topics/tv3_engine_state.h>
+#include <uORB/topics/tv3_mode_status.h>
+#include <uORB/topics/tv3_status.h>
+#include <uORB/topics/tv3_thrust.h>
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_command_ack.h>
 #include <uORB/topics/vehicle_status.h>
@@ -30,7 +30,7 @@ using namespace time_literals;
 
 namespace
 {
-constexpr uint32_t kRocketVehicleCommand = 31010;
+constexpr uint32_t kTV3VehicleCommand = 31010;
 constexpr int kMaxEngines = 4;
 
 static void copy_motor_id(char (&dst)[32], const char (&src)[32])
@@ -46,13 +46,13 @@ static uint8_t engine_bit(int engine_index)
 static const char *command_name(uint8_t command)
 {
 	switch (command) {
-	case rocket_command_s::COMMAND_LAUNCH:
+	case tv3_command_s::COMMAND_LAUNCH:
 		return "launch";
 
-	case rocket_command_s::COMMAND_ABORT:
+	case tv3_command_s::COMMAND_ABORT:
 		return "abort";
 
-	case rocket_command_s::COMMAND_RESET:
+	case tv3_command_s::COMMAND_RESET:
 		return "reset";
 
 	default:
@@ -63,25 +63,25 @@ static const char *command_name(uint8_t command)
 static const char *mode_name(uint8_t mode)
 {
 	switch (mode) {
-	case rocket_status_s::MODE_DISARMED_SAFE:
+	case tv3_status_s::MODE_DISARMED_SAFE:
 		return "DISARMED_SAFE";
 
-	case rocket_status_s::MODE_ARMED_STANDBY:
+	case tv3_status_s::MODE_ARMED_STANDBY:
 		return "ARMED_STANDBY";
 
-	case rocket_status_s::MODE_READY:
+	case tv3_status_s::MODE_READY:
 		return "READY";
 
-	case rocket_status_s::MODE_IGNITION_PENDING:
+	case tv3_status_s::MODE_IGNITION_PENDING:
 		return "IGNITION_PENDING";
 
-	case rocket_status_s::MODE_BOOST:
+	case tv3_status_s::MODE_BOOST:
 		return "BOOST";
 
-	case rocket_status_s::MODE_COAST:
+	case tv3_status_s::MODE_COAST:
 		return "COAST";
 
-	case rocket_status_s::MODE_ABORT:
+	case tv3_status_s::MODE_ABORT:
 		return "ABORT";
 
 	default:
@@ -92,25 +92,25 @@ static const char *mode_name(uint8_t mode)
 static const char *fault_name(uint32_t fault)
 {
 	switch (fault) {
-	case rocket_status_s::FAULT_NONE:
+	case tv3_status_s::FAULT_NONE:
 		return "none";
 
-	case rocket_status_s::FAULT_COMMAND_ABORT:
+	case tv3_status_s::FAULT_COMMAND_ABORT:
 		return "command_abort";
 
-	case rocket_status_s::FAULT_IGNITION_TIMEOUT:
+	case tv3_status_s::FAULT_IGNITION_TIMEOUT:
 		return "ignition_timeout";
 
-	case rocket_status_s::FAULT_SENSOR_STALE:
+	case tv3_status_s::FAULT_SENSOR_STALE:
 		return "sensor_stale";
 
-	case rocket_status_s::FAULT_GCS_LOSS:
+	case tv3_status_s::FAULT_GCS_LOSS:
 		return "gcs_loss";
 
-	case rocket_status_s::FAULT_MOTOR_DATA:
+	case tv3_status_s::FAULT_MOTOR_DATA:
 		return "motor_data";
 
-	case rocket_status_s::FAULT_ARMING:
+	case tv3_status_s::FAULT_ARMING:
 		return "arming";
 
 	default:
@@ -119,10 +119,10 @@ static const char *fault_name(uint32_t fault)
 }
 }
 
-class RocketModeManager : public ModuleBase<RocketModeManager>, public ModuleParams, public px4::ScheduledWorkItem
+class TV3ModeManager : public ModuleBase<TV3ModeManager>, public ModuleParams, public px4::ScheduledWorkItem
 {
 public:
-	RocketModeManager() :
+	TV3ModeManager() :
 		ModuleParams(nullptr),
 		ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers)
 	{
@@ -131,7 +131,7 @@ public:
 
 	static int task_spawn(int argc, char *argv[])
 	{
-		RocketModeManager *instance = new RocketModeManager();
+		TV3ModeManager *instance = new TV3ModeManager();
 
 		if (instance == nullptr) {
 			PX4_ERR("alloc failed");
@@ -157,27 +157,27 @@ public:
 			return print_usage("missing command");
 		}
 
-		uint8_t command = rocket_command_s::COMMAND_NONE;
+		uint8_t command = tv3_command_s::COMMAND_NONE;
 
 		if (!strcmp(argv[0], "launch")) {
-			command = rocket_command_s::COMMAND_LAUNCH;
+			command = tv3_command_s::COMMAND_LAUNCH;
 		} else if (!strcmp(argv[0], "abort")) {
-			command = rocket_command_s::COMMAND_ABORT;
+			command = tv3_command_s::COMMAND_ABORT;
 		} else if (!strcmp(argv[0], "reset")) {
-			command = rocket_command_s::COMMAND_RESET;
+			command = tv3_command_s::COMMAND_RESET;
 		} else {
 			return print_usage("unknown command");
 		}
 
-		RocketModeManager *instance = get_instance();
+		TV3ModeManager *instance = get_instance();
 
 		if (instance == nullptr) {
 			PX4_WARN("not running");
 			return PX4_ERROR;
 		}
 
-		instance->publish_rocket_command(command, rocket_command_s::SOURCE_SCRIPT);
-		instance->handle_rocket_command(command);
+		instance->publish_tv3_command(command, tv3_command_s::SOURCE_SCRIPT);
+		instance->handle_tv3_command(command);
 		return PX4_OK;
 	}
 
@@ -187,8 +187,8 @@ public:
 			PX4_WARN("%s", reason);
 		}
 
-		PRINT_MODULE_DESCRIPTION("Rocket ascent state machine and ignition manager.");
-		PRINT_MODULE_USAGE_NAME("rocket_mode_manager", "modules");
+		PRINT_MODULE_DESCRIPTION("TV3 ascent state machine and ignition manager.");
+		PRINT_MODULE_USAGE_NAME("tv3_mode_manager", "modules");
 		PRINT_MODULE_USAGE_COMMAND("start");
 		PRINT_MODULE_USAGE_COMMAND_DESCR("launch", "Publish a launch command");
 		PRINT_MODULE_USAGE_COMMAND_DESCR("abort", "Publish an abort command");
@@ -226,8 +226,8 @@ private:
 		}
 
 		_vehicle_status_sub.update(&_vehicle_status);
-		_rocket_thrust_sub.update(&_thrust);
-		_rocket_engine_state_sub.update(&_engine_state);
+		_tv3_thrust_sub.update(&_thrust);
+		_tv3_engine_state_sub.update(&_engine_state);
 
 		process_commands();
 		update_state(now);
@@ -237,18 +237,18 @@ private:
 
 	void process_commands()
 	{
-		rocket_command_s rocket_cmd{};
+		tv3_command_s tv3_cmd{};
 
-		while (_rocket_command_sub.update(&rocket_cmd)) {
-			handle_rocket_command(rocket_cmd.command);
+		while (_tv3_command_sub.update(&tv3_cmd)) {
+			handle_tv3_command(tv3_cmd.command);
 		}
 
 		vehicle_command_s vehicle_cmd{};
 
 		while (_vehicle_command_sub.update(&vehicle_cmd)) {
-			if (vehicle_cmd.command == kRocketVehicleCommand) {
+			if (vehicle_cmd.command == kTV3VehicleCommand) {
 				const uint8_t command = static_cast<uint8_t>(vehicle_cmd.param1);
-				const bool accepted = handle_rocket_command(command);
+				const bool accepted = handle_tv3_command(command);
 				publish_ack(vehicle_cmd, accepted ? vehicle_command_ack_s::VEHICLE_CMD_RESULT_ACCEPTED :
 					    vehicle_command_ack_s::VEHICLE_CMD_RESULT_DENIED);
 
@@ -261,9 +261,9 @@ private:
 		}
 	}
 
-	void publish_rocket_command(uint8_t command, uint8_t source)
+	void publish_tv3_command(uint8_t command, uint8_t source)
 	{
-		rocket_command_s msg{};
+		tv3_command_s msg{};
 		msg.timestamp = hrt_absolute_time();
 		msg.command = command;
 		msg.source = source;
@@ -271,18 +271,18 @@ private:
 		_command_pub.publish(msg);
 	}
 
-	bool handle_rocket_command(uint8_t command)
+	bool handle_tv3_command(uint8_t command)
 	{
 		switch (command) {
-		case rocket_command_s::COMMAND_LAUNCH:
+		case tv3_command_s::COMMAND_LAUNCH:
 			_launch_requested = true;
 			return true;
 
-		case rocket_command_s::COMMAND_ABORT:
+		case tv3_command_s::COMMAND_ABORT:
 			_abort_requested = true;
 			return true;
 
-		case rocket_command_s::COMMAND_RESET:
+		case tv3_command_s::COMMAND_RESET:
 			_reset_requested = true;
 			return true;
 
@@ -309,7 +309,7 @@ private:
 			return;
 		}
 
-		if (_mode == rocket_status_s::MODE_ABORT || _fault_reason != rocket_status_s::FAULT_NONE) {
+		if (_mode == tv3_status_s::MODE_ABORT || _fault_reason != tv3_status_s::FAULT_NONE) {
 			mavlink_log_critical(&_mavlink_log_pub, "TV3 state %s fault %s\t", mode_name(_mode), fault_name(_fault_reason));
 		} else {
 			mavlink_log_info(&_mavlink_log_pub, "TV3 state %s\t", mode_name(_mode));
@@ -374,13 +374,13 @@ private:
 			p = param_find("RK_ENG_COUNT");
 			if (p != PARAM_INVALID) {
 				param_get(p, &_engine_count);
-				_engine_count = math::constrain(_engine_count, 1, kMaxEngines);
+				_engine_count = math::constrain(_engine_count, static_cast<int32_t>(1), static_cast<int32_t>(kMaxEngines));
 			}
 
 			p = param_find("RK_IGN_DWELL_MS");
 			if (p != PARAM_INVALID) {
 				param_get(p, &_ignition_dwell_ms);
-				_ignition_dwell_ms = math::max(_ignition_dwell_ms, 0);
+				_ignition_dwell_ms = math::max(_ignition_dwell_ms, static_cast<int32_t>(0));
 			}
 
 			for (int i = 0; i < kMaxEngines; ++i) {
@@ -389,15 +389,16 @@ private:
 				p = param_find(name);
 				if (p != PARAM_INVALID) {
 					param_get(p, &_ignition_sequence[i]);
-					_ignition_sequence[i] = math::constrain(_ignition_sequence[i], 0, kMaxEngines - 1);
+					_ignition_sequence[i] = math::constrain(_ignition_sequence[i], static_cast<int32_t>(0),
+									 static_cast<int32_t>(kMaxEngines - 1));
 				}
 			}
 		}
 
 		void reset_state()
 		{
-		_mode = rocket_status_s::MODE_DISARMED_SAFE;
-		_fault_reason = rocket_status_s::FAULT_NONE;
+		_mode = tv3_status_s::MODE_DISARMED_SAFE;
+		_fault_reason = tv3_status_s::FAULT_NONE;
 		_ignition_on = false;
 		_launch_requested = false;
 		_abort_requested = false;
@@ -415,7 +416,7 @@ private:
 		void set_fault(uint32_t fault_reason)
 		{
 			_fault_reason = fault_reason;
-			_mode = rocket_status_s::MODE_ABORT;
+			_mode = tv3_status_s::MODE_ABORT;
 			_ignition_on = false;
 			_ignition_mask = 0;
 		}
@@ -506,8 +507,8 @@ private:
 		const bool gcs_ok = !_vehicle_status.gcs_connection_lost;
 
 			if (_reset_requested) {
-				_mode = rocket_status_s::MODE_READY;
-				_fault_reason = rocket_status_s::FAULT_NONE;
+				_mode = tv3_status_s::MODE_READY;
+				_fault_reason = tv3_status_s::FAULT_NONE;
 				_ignition_on = false;
 			_reset_requested = false;
 			_abort_requested = false;
@@ -522,22 +523,22 @@ private:
 			}
 
 		if (_abort_requested) {
-			set_fault(rocket_status_s::FAULT_COMMAND_ABORT);
+			set_fault(tv3_status_s::FAULT_COMMAND_ABORT);
 			_abort_requested = false;
 		}
 
-		if (_mode == rocket_status_s::MODE_DISARMED_SAFE) {
-			_mode = rocket_status_s::MODE_ARMED_STANDBY;
+		if (_mode == tv3_status_s::MODE_DISARMED_SAFE) {
+			_mode = tv3_status_s::MODE_ARMED_STANDBY;
 		}
 
 		const bool motor_loaded = _thrust.selected_motor_id[0] != '\0';
 
-		if ((_mode == rocket_status_s::MODE_ARMED_STANDBY || _mode == rocket_status_s::MODE_READY) && motor_loaded) {
-			_mode = rocket_status_s::MODE_READY;
+		if ((_mode == tv3_status_s::MODE_ARMED_STANDBY || _mode == tv3_status_s::MODE_READY) && motor_loaded) {
+			_mode = tv3_status_s::MODE_READY;
 		}
 
-			if (_mode == rocket_status_s::MODE_READY && _launch_requested) {
-				_mode = rocket_status_s::MODE_IGNITION_PENDING;
+			if (_mode == tv3_status_s::MODE_READY && _launch_requested) {
+				_mode = tv3_status_s::MODE_IGNITION_PENDING;
 				_ignition_on = true;
 				start_engine_sequence(now);
 				_launch_requested = false;
@@ -545,30 +546,30 @@ private:
 			}
 
 		if (_abort_on_gcs_loss > 0 && !gcs_ok
-		    && (_mode == rocket_status_s::MODE_IGNITION_PENDING || _mode == rocket_status_s::MODE_BOOST)) {
-			set_fault(rocket_status_s::FAULT_GCS_LOSS);
+		    && (_mode == tv3_status_s::MODE_IGNITION_PENDING || _mode == tv3_status_s::MODE_BOOST)) {
+			set_fault(tv3_status_s::FAULT_GCS_LOSS);
 		}
 
-			if (_mode == rocket_status_s::MODE_IGNITION_PENDING) {
+			if (_mode == tv3_status_s::MODE_IGNITION_PENDING) {
 				update_engine_sequence(now);
 
 				if (!active_sequence_engine_confirmed() && _ignition_timestamp != 0
 				    && hrt_elapsed_time(&_ignition_timestamp) > static_cast<hrt_abstime>(_ignition_timeout_ms) * 1000ULL) {
-					set_fault(rocket_status_s::FAULT_IGNITION_TIMEOUT);
+					set_fault(tv3_status_s::FAULT_IGNITION_TIMEOUT);
 				}
 
 				const bool ignition_sequence_complete = _engine_count > 1 ? _sequence_complete : ignition_confirmed;
 
 				if (ignition_sequence_complete) {
-					_mode = rocket_status_s::MODE_BOOST;
+					_mode = tv3_status_s::MODE_BOOST;
 					_boost_timestamp = now;
 					_last_update = now;
 			}
 		}
 
-		if (_mode == rocket_status_s::MODE_BOOST) {
+		if (_mode == tv3_status_s::MODE_BOOST) {
 			if (!thrust_valid) {
-				set_fault(rocket_status_s::FAULT_SENSOR_STALE);
+				set_fault(tv3_status_s::FAULT_SENSOR_STALE);
 			}
 
 			const float dt_s = _last_update != 0 ? static_cast<float>(now - _last_update) * 1e-6f : 0.f;
@@ -590,7 +591,7 @@ private:
 				if (_burnout_low_timestamp == 0) {
 					_burnout_low_timestamp = now;
 				} else if (hrt_elapsed_time(&_burnout_low_timestamp) > static_cast<hrt_abstime>(_burnout_dwell_ms) * 1000ULL) {
-					_mode = rocket_status_s::MODE_COAST;
+					_mode = tv3_status_s::MODE_COAST;
 					_ignition_on = false;
 				}
 			} else {
@@ -598,17 +599,17 @@ private:
 			}
 
 			if (burn_time_us > static_cast<hrt_abstime>(_maximum_burn_ms) * 1000ULL) {
-				_mode = rocket_status_s::MODE_COAST;
+				_mode = tv3_status_s::MODE_COAST;
 				_ignition_on = false;
 			}
 		}
 
-			if (_mode == rocket_status_s::MODE_COAST) {
+			if (_mode == tv3_status_s::MODE_COAST) {
 				_ignition_on = false;
 				_ignition_mask = 0;
 			}
 
-			if (_mode == rocket_status_s::MODE_ABORT) {
+			if (_mode == tv3_status_s::MODE_ABORT) {
 				_ignition_on = false;
 				_ignition_mask = 0;
 			}
@@ -622,25 +623,25 @@ private:
 			engine.throttle_control = _ignition_on ? 1.f : 0.f;
 			_engine_pub.publish(engine);
 
-			rocket_engine_command_s engine_command{};
+			tv3_engine_command_s engine_command{};
 			engine_command.timestamp = now;
 			engine_command.engine_count = static_cast<uint8_t>(_engine_count);
 			engine_command.ignition_mask = _ignition_mask;
 			engine_command.active_ignition_index = static_cast<uint8_t>(_ignition_sequence[_active_sequence_slot]);
-			engine_command.sequence_active = _mode == rocket_status_s::MODE_IGNITION_PENDING || _mode == rocket_status_s::MODE_BOOST;
+			engine_command.sequence_active = _mode == tv3_status_s::MODE_IGNITION_PENDING || _mode == tv3_status_s::MODE_BOOST;
 			engine_command.sequence_complete = _sequence_complete;
 			_engine_command_pub.publish(engine_command);
 
-		rocket_status_s status{};
+		tv3_status_s status{};
 		status.timestamp = now;
 		status.mode = _mode;
-		status.mode_active = _mode != rocket_status_s::MODE_DISARMED_SAFE;
+		status.mode_active = _mode != tv3_status_s::MODE_DISARMED_SAFE;
 		status.armed = _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
-		status.ready = _mode >= rocket_status_s::MODE_READY && _mode != rocket_status_s::MODE_ABORT;
+		status.ready = _mode >= tv3_status_s::MODE_READY && _mode != tv3_status_s::MODE_ABORT;
 		status.ignition_on = _ignition_on;
 		status.ignition_confirmed = _thrust.ignition_confirmed;
 		status.rail_exit = _rail_exit;
-		status.burnout_detected = _mode == rocket_status_s::MODE_COAST;
+		status.burnout_detected = _mode == tv3_status_s::MODE_COAST;
 		status.thrust_valid = _thrust.valid;
 		status.gcs_link_ok = !_vehicle_status.gcs_connection_lost;
 		status.ignition_timestamp = _ignition_timestamp;
@@ -659,7 +660,7 @@ private:
 		copy_motor_id(status.selected_motor_id, _thrust.selected_motor_id);
 		_status_pub.publish(status);
 
-		rocket_mode_status_s compat{};
+		tv3_mode_status_s compat{};
 		compat.timestamp = now;
 		compat.state = _mode;
 		compat.mode_active = status.mode_active;
@@ -674,24 +675,24 @@ private:
 		compat.rail_distance_m = status.rail_distance_m;
 
 		switch (_fault_reason) {
-		case rocket_status_s::FAULT_COMMAND_ABORT:
-			compat.abort_reason = rocket_mode_status_s::ABORT_REASON_COMMAND;
+		case tv3_status_s::FAULT_COMMAND_ABORT:
+			compat.abort_reason = tv3_mode_status_s::ABORT_REASON_COMMAND;
 			break;
 
-		case rocket_status_s::FAULT_IGNITION_TIMEOUT:
-			compat.abort_reason = rocket_mode_status_s::ABORT_REASON_IGNITION_TIMEOUT;
+		case tv3_status_s::FAULT_IGNITION_TIMEOUT:
+			compat.abort_reason = tv3_mode_status_s::ABORT_REASON_IGNITION_TIMEOUT;
 			break;
 
-		case rocket_status_s::FAULT_SENSOR_STALE:
-			compat.abort_reason = rocket_mode_status_s::ABORT_REASON_SENSOR_STALE;
+		case tv3_status_s::FAULT_SENSOR_STALE:
+			compat.abort_reason = tv3_mode_status_s::ABORT_REASON_SENSOR_STALE;
 			break;
 
-		case rocket_status_s::FAULT_GCS_LOSS:
-			compat.abort_reason = rocket_mode_status_s::ABORT_REASON_GCS_LOSS;
+		case tv3_status_s::FAULT_GCS_LOSS:
+			compat.abort_reason = tv3_mode_status_s::ABORT_REASON_GCS_LOSS;
 			break;
 
 		default:
-			compat.abort_reason = rocket_mode_status_s::ABORT_REASON_NONE;
+			compat.abort_reason = tv3_mode_status_s::ABORT_REASON_NONE;
 			break;
 		}
 
@@ -712,8 +713,8 @@ private:
 		int32_t _ignition_sequence[kMaxEngines]{0, 1, 2, 3};
 		int32_t _ignition_dwell_ms{0};
 
-		uint8_t _mode{rocket_status_s::MODE_DISARMED_SAFE};
-		uint32_t _fault_reason{rocket_status_s::FAULT_NONE};
+		uint8_t _mode{tv3_status_s::MODE_DISARMED_SAFE};
+		uint32_t _fault_reason{tv3_status_s::FAULT_NONE};
 	bool _launch_requested{false};
 	bool _abort_requested{false};
 	bool _reset_requested{false};
@@ -733,26 +734,26 @@ private:
 			uint32_t _last_announced_fault{UINT32_MAX};
 
 		vehicle_status_s _vehicle_status{};
-		rocket_thrust_s _thrust{};
-		rocket_engine_state_s _engine_state{};
+		tv3_thrust_s _thrust{};
+		tv3_engine_state_s _engine_state{};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 		uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
-		uORB::Subscription _rocket_command_sub{ORB_ID(rocket_command)};
-		uORB::Subscription _rocket_thrust_sub{ORB_ID(rocket_thrust)};
-		uORB::Subscription _rocket_engine_state_sub{ORB_ID(rocket_engine_state)};
+		uORB::Subscription _tv3_command_sub{ORB_ID(tv3_command)};
+		uORB::Subscription _tv3_thrust_sub{ORB_ID(tv3_thrust)};
+		uORB::Subscription _tv3_engine_state_sub{ORB_ID(tv3_engine_state)};
 
-		uORB::Publication<rocket_command_s> _command_pub{ORB_ID(rocket_command)};
+		uORB::Publication<tv3_command_s> _command_pub{ORB_ID(tv3_command)};
 		uORB::Publication<internal_combustion_engine_control_s> _engine_pub{ORB_ID(internal_combustion_engine_control)};
-		uORB::Publication<rocket_engine_command_s> _engine_command_pub{ORB_ID(rocket_engine_command)};
-		uORB::Publication<rocket_status_s> _status_pub{ORB_ID(rocket_status)};
-	uORB::Publication<rocket_mode_status_s> _compat_status_pub{ORB_ID(rocket_mode_status)};
+		uORB::Publication<tv3_engine_command_s> _engine_command_pub{ORB_ID(tv3_engine_command)};
+		uORB::Publication<tv3_status_s> _status_pub{ORB_ID(tv3_status)};
+	uORB::Publication<tv3_mode_status_s> _compat_status_pub{ORB_ID(tv3_mode_status)};
 	uORB::Publication<vehicle_command_ack_s> _ack_pub{ORB_ID(vehicle_command_ack)};
 	orb_advert_t _mavlink_log_pub{nullptr};
 };
 
-extern "C" __EXPORT int rocket_mode_manager_main(int argc, char *argv[])
+extern "C" __EXPORT int tv3_mode_manager_main(int argc, char *argv[])
 {
-	return RocketModeManager::main(argc, argv);
+	return TV3ModeManager::main(argc, argv);
 }

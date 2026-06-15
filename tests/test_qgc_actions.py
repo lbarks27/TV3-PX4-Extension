@@ -8,15 +8,15 @@ from pathlib import Path
 
 class QGroundControlActionTests(unittest.TestCase):
     def test_tv3_qgc_actions_match_firmware_command_contract(self) -> None:
-        actions_path = Path("config/qgc/TV3RocketActions.json")
-        source_path = Path("src/modules/flight_modes/rocket_mode_manager.cpp")
-        command_msg_path = Path("msg/RocketCommand.msg")
+        actions_path = Path("config/qgc/TV3Actions.json")
+        source_path = Path("src/modules/flight_modes/tv3_mode_manager.cpp")
+        command_msg_path = Path("msg/Tv3Command.msg")
 
         actions_doc = json.loads(actions_path.read_text())
         source = source_path.read_text()
         command_msg = command_msg_path.read_text()
 
-        command_id_match = re.search(r"constexpr uint32_t kRocketVehicleCommand = (\d+);", source)
+        command_id_match = re.search(r"constexpr uint32_t kTV3VehicleCommand = (\d+);", source)
         self.assertIsNotNone(command_id_match)
         command_id = int(command_id_match.group(1))
 

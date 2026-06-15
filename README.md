@@ -1,11 +1,11 @@
-# TV3 PX4 Rocket Extension
+# TV3 PX4 Extension
 
-Out-of-tree PX4 modules, uORB messages, and tooling for thrust-vector-controlled solid-motor rockets.
+Out-of-tree PX4 modules, uORB messages, and tooling for thrust-vector-controlled TV3 vehicles.
 
 - Single-engine TVC ascent vehicle (`tv3_v1`)
 - Three-engine splay-throttle lander vehicle (`tv3_lander_v1`)
 
-Designed for `EXTERNAL_MODULES_LOCATION` builds against PX4 v1.16.1. Vehicle manifests in `config/vehicles/` drive generated SIH/SITL runtime payloads, JSBSim assets, and motor reference data.
+Designed for `EXTERNAL_MODULES_LOCATION` builds against PX4 v1.16.1. Vehicle manifests in `config/vehicles/` drive generated SIH/SITL runtime payloads and motor reference data.
 Flight profiles in `config/flight_profiles/` define scenario targets that can be loaded on top of those vehicle manifests for SITL runs.
 
 ## Documentation

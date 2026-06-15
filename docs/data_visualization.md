@@ -33,12 +33,12 @@ PX4 reads `etc/logging/logger_topics.txt` from its storage directory at boot. Th
 That profile includes core PX4 state and control-allocation topics plus TV3-specific topics such as:
 
 ```text
-rocket_status
-rocket_thrust
-rocket_motor_reference
-rocket_engine_command
-rocket_engine_state
-rocket_guidance_status
+tv3_status
+tv3_thrust
+tv3_motor_reference
+tv3_engine_command
+tv3_engine_state
+tv3_guidance_status
 vehicle_local_position_groundtruth
 vehicle_torque_setpoint
 vehicle_thrust_setpoint
@@ -121,4 +121,4 @@ vehicle_local_position_groundtruth
 vehicle_global_position_groundtruth
 ```
 
-Hawkeye is a viewer on UDP `19410`; it is not the physics source of truth. Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 rocket module outputs.
+Hawkeye is a viewer on UDP `19410`; it is not the physics source of truth. Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 tv3 module outputs.

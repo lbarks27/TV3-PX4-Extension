@@ -10,9 +10,9 @@ For build and run instructions, see [docs/simulation.md](simulation.md).
 - `tv3_lander_v1` is the active three-engine lander validation manifest.
 - PX4 SIH plus the external `tv3_sih` module is now the active simulator path.
 - Hawkeye is visualization only and consumes the PX4 SIH MAVLink stream on UDP `19410`.
-- `tools/generate_vehicle_assets.py` generates runtime params, motor placeholders, logger topics, and JSBSim assets from a selected manifest.
+- `tools/generate_vehicle_assets.py` generates runtime params, motor placeholders, and logger topics from a selected manifest.
 - The retired Gazebo workflow is archived under `deprecated/sim/gazebo/`; large generated payloads and old run logs are archived under `../deprecated-sim/gazebo/`.
-- `rocket_motor_model`, `rocket_load_cell`, `rocket_mode_manager`, `rocket_att_control`, `rocket_guidance`, and the allocator plumbing remain the active flight-software path.
+- `tv3_motor_model`, `tv3_load_cell`, `tv3_mode_manager`, `tv3_att_control`, `tv3_guidance`, and the allocator plumbing remain the active flight-software path.
 
 Important limits remain:
 
@@ -102,7 +102,7 @@ Work:
 Exit criteria:
 
 - SIH shows reference-thrust ignition and load-cell-confirmed ignition using the same state transitions.
-- Bench ADC replay reproduces expected `rocket_engine_state` and aggregate thrust behavior.
+- Bench ADC replay reproduces expected `tv3_engine_state` and aggregate thrust behavior.
 
 ## Phase 4: Control Mixer
 
@@ -147,7 +147,7 @@ Work:
 
 Exit criteria:
 
-- Bench tests reproduce expected `rocket_mode_manager` transitions.
+- Bench tests reproduce expected `tv3_mode_manager` transitions.
 - Ignition cannot advance without load-cell confirmation unless an explicit test mode allows it.
 - Logs contain enough data to compare real thrust, expected thrust, commands, and vehicle response.
 

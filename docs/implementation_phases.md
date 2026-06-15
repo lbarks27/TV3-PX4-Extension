@@ -6,13 +6,13 @@ For the full from-current-state-to-flight-ready plan, see `docs/completion_roadm
 
 ## Product Intent
 
-TV3 is an out-of-tree PX4 extension for thrust-vector-controlled solid-motor rockets. The intended product is not a standalone flight app; it is a set of PX4 modules, uORB topics, vehicle definitions, ROMFS overlays, SIH simulation modules, and host-side generators that let selected vehicle manifests drive SITL, hardware runtime assets, and motor-reference data.
+TV3 is an out-of-tree PX4 extension for thrust-vector-controlled TV3 vehicles. The intended product is not a standalone flight app; it is a set of PX4 modules, uORB topics, vehicle definitions, ROMFS overlays, SIH simulation modules, and host-side generators that let selected vehicle manifests drive SITL, hardware runtime assets, and motor-reference data.
 
 The core loop is:
 
 1. Load a selected motor reference and expected mass/thrust curve.
-2. Convert load-cell or reference thrust into a trusted `rocket_thrust` signal.
-3. Gate launch, ignition, boost, burnout, coast, abort, and reset through `rocket_mode_manager`.
+2. Convert load-cell or reference thrust into a trusted `tv3_thrust` signal.
+3. Gate launch, ignition, boost, burnout, coast, abort, and reset through `tv3_mode_manager`.
 4. Publish thrust and torque setpoints for PX4 control allocation and TVC actuation.
 5. When explicitly enabled by a manifest, layer waypoint/apogee/landing guidance on top of the launch loop after checking the remaining thrust/control envelope.
 
@@ -20,13 +20,13 @@ The core loop is:
 
 The repo now defaults to the smallest useful launch/boost slice:
 
-- Built by default: `rocket_motor_model`, `rocket_load_cell`, `rocket_mode_manager`, `rocket_att_control`, and manifest-gated `rocket_guidance`.
+- Built by default: `tv3_motor_model`, `tv3_load_cell`, `tv3_mode_manager`, `tv3_att_control`, and manifest-gated `tv3_guidance`.
 - Started by default in SITL overlays: control allocator, engine control, motor model, load cell, mode manager, and attitude control.
 - Disabled by default at startup: autonomous guidance starts only when the selected vehicle manifest sets `guidance.enable: 1`.
 - Verified locally: motor catalog normalization, vehicle asset generation, and generated `RK_*` parameter names matching firmware definitions.
 - Generated runtime and simulation assets live under `build/`; tracked runtime files are limited to SD-card startup templates.
 
-This gives us a narrow product we can reason about: configure a rocket, load motor data, arm, command launch/abort/reset, detect ignition/burnout, and publish TVC-relevant setpoints. The current repo also includes a three-engine lander manifest, per-engine propulsion state plumbing, the `tv3_sih` simulation module, and a host allocator helper; those are the starting point for the completion roadmap.
+This gives us a narrow product we can reason about: configure a tv3, load motor data, arm, command launch/abort/reset, detect ignition/burnout, and publish TVC-relevant setpoints. The current repo also includes a three-engine lander manifest, per-engine propulsion state plumbing, the `tv3_sih` simulation module, and a host allocator helper; those are the starting point for the completion roadmap.
 
 ## Phase Gates
 
@@ -45,14 +45,14 @@ Phase 2: Motor and load-cell confidence
 
 Phase 3: Guidance re-entry
 
-- Use a guidance-enabled manifest so `prepare_px4_tree.sh` starts `rocket_guidance` in the generated startup overlay.
-- Decide which phases are commanded by PX4 trajectory setpoints versus rocket-only status.
+- Use a guidance-enabled manifest so `prepare_px4_tree.sh` starts `tv3_guidance` in the generated startup overlay.
+- Decide which phases are commanded by PX4 trajectory setpoints versus tv3-only status.
 - Add tests for standby, ascent, apogee, waypoint, landing, complete, and abort transitions.
 
 Phase 4: PX4 allocator and SITL fidelity
 
 - Refresh the PX4 patch against the selected PX4 tag.
-- Run SIH and JSBSim asset generation from the same vehicle YAML.
+- Run SIH asset generation from the vehicle YAML.
 - Verify TVC actuator outputs under expected and measured thrust changes.
 
 Phase 5: Hardware readiness

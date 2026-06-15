@@ -107,7 +107,7 @@ TV3 MAVLink actions:
 ```
 
 Restart QGC after installing. The Fly View action list should include `TV3
-Launch`, `TV3 Abort`, and `TV3 Reset`. Use `TV3 Launch` for rocket launch in
+Launch`, `TV3 Abort`, and `TV3 Reset`. Use `TV3 Launch` for tv3 launch in
 sim and hardware; do not remap QGC's generic `Takeoff` button to ignition.
 
 On macOS with the PX4 Homebrew tap, Hawkeye can be installed with:

@@ -1,13 +1,22 @@
+if(NOT PX4_PLATFORM STREQUAL "nuttx")
+	px4_add_module(
+		MODULE modules__tv3_motor_model
+		MAIN tv3_motor_model
+		SRCS
+			tv3_motor_model.cpp
+	)
+endif()
+
 px4_add_module(
-	MODULE modules__rocket_motor_model
-	MAIN rocket_motor_model
+	MODULE modules__tv3_load_cell
+	MAIN tv3_load_cell
 	SRCS
-		rocket_motor_model.cpp
+		tv3_load_cell.cpp
 )
 
 px4_add_module(
-	MODULE modules__rocket_load_cell
-	MAIN rocket_load_cell
+	MODULE modules__tv3_load_cell_telemetry
+	MAIN tv3_load_cell_telemetry
 	SRCS
-		rocket_load_cell.cpp
+		tv3_load_cell_telemetry.cpp
 )

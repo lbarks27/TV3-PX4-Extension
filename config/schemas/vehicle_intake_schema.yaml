@@ -28,7 +28,7 @@ propulsion:
   required:
     - engine count, up to four
     - engine id, motor index, mount position, nominal thrust axis, pitch axis, yaw axis
-    - motor loaded mass, dry mass, COM, and vendor thrust/mass curve reference
+    - motor loaded mass, dry mass, COM, and config/thrust_curves reference
     - ignition sequence and dwell/timeout policy
     - splay/cosine-loss throttle mechanism, max angle, and slew rate
     - per-engine thrust fraction for aggregate compatibility

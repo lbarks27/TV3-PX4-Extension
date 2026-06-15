@@ -1,4 +1,4 @@
-# TV3 PX4 rocket extension runtime defaults.
+# TV3 PX4 extension runtime defaults.
 #
 # Copy this file to /fs/microsd/etc/config.txt on the target hardware.
 

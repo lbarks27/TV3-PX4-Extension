@@ -1,4 +1,4 @@
-# TV3 PX4 rocket extension runtime startup.
+# TV3 PX4 extension runtime startup.
 #
 # Copy this file to /fs/microsd/etc/extras.txt on the target hardware.
 
@@ -7,9 +7,8 @@ then
 	param import ${TV3_AIRFRAME}
 fi
 
-control_allocator start
-internal_combustion_engine_control start
-rocket_motor_model start
-rocket_load_cell start
-rocket_mode_manager start
-rocket_att_control start
+ads1115 start -X -b 2 -a 0x48
+tv3_load_cell start
+tv3_load_cell_telemetry start
+mavlink stream -d /dev/ttyACM0 -s NAMED_VALUE_FLOAT -r 10
+mavlink stream -d /dev/ttyACM0 -s DEBUG_VECT -r 10

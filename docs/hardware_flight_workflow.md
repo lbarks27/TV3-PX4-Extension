@@ -83,16 +83,16 @@ On boot, PX4 reads `/fs/microsd/etc/config.txt` and
 airframe parameters and starts:
 
 ```sh
-control_allocator start
-internal_combustion_engine_control start
-rocket_motor_model start
-rocket_load_cell start
-rocket_mode_manager start
-rocket_att_control start
+ads1115 start -X -b 2 -a 0x48
+tv3_load_cell start
+tv3_load_cell_telemetry start
+mavlink stream -d /dev/ttyACM0 -s NAMED_VALUE_FLOAT -r 10
+mavlink stream -d /dev/ttyACM0 -s DEBUG_VECT -r 10
 ```
 
-Guidance is not started for `tv3_v1` by default. Keep it disabled for the first
-single-engine ascent gate unless it has its own evidence review.
+This bench hardware overlay is intentionally limited to load-cell bring-up so
+the Cube Orange Plus image stays under flash. Keep the launch/control modules
+disabled until the sensor path is verified.
 
 ## Connect From QGroundControl
 
@@ -114,7 +114,7 @@ Install the repo's QGC MAVLink actions:
 Restart QGC after installing. The action file is copied to:
 
 ```text
-~/Documents/QGroundControl/MavlinkActions/TV3RocketActions.json
+~/Documents/QGroundControl/MavlinkActions/TV3Actions.json
 ```
 
 The Fly View action list should then include:
@@ -123,9 +123,9 @@ The Fly View action list should then include:
 - `TV3 Abort`
 - `TV3 Reset`
 
-Do not remap QGC's generic `Takeoff` button to rocket ignition. The TV3
+Do not remap QGC's generic `Takeoff` button to tv3 ignition. The TV3
 hardware and SIH paths intentionally use the same explicit `TV3 Launch` action
-so the operator sees a rocket-specific command with `Abort` and `Reset` nearby.
+so the operator sees a tv3-specific command with `Abort` and `Reset` nearby.
 The launch action is valid for sim and hardware only after the normal arming,
 state-machine, range, and pad-safety checks pass.
 
@@ -133,22 +133,59 @@ These actions send `MAV_CMD_USER_1` command `31010`:
 
 | Action | `param1` | PX4 shell equivalent |
 | --- | ---: | --- |
-| Launch | `1` | `rocket_mode_manager launch` |
-| Abort | `2` | `rocket_mode_manager abort` |
-| Reset | `3` | `rocket_mode_manager reset` |
+| Launch | `1` | `tv3_mode_manager launch` |
+| Abort | `2` | `tv3_mode_manager abort` |
+| Reset | `3` | `tv3_mode_manager reset` |
 
 Use QGC's MAVLink Console for software visibility:
 
 ```sh
-rocket_mode_manager status
-listener rocket_status
-listener rocket_mode_status
+tv3_mode_manager status
+listener tv3_status
+listener tv3_mode_status
 listener vehicle_command_ack
 ```
 
 QGC does not provide first-class widgets for the custom TV3 uORB topics, so
 expect to use status text, the parameter editor, MAVLink Console, and post-run
 ULog review.
+
+For the ADS1115 bench load-cell path, open QGC's MAVLink Inspector and watch:
+
+- `NAMED_VALUE_FLOAT` with name `lc_kg`: calibrated mass in kg
+- `DEBUG_VECT` with name `lc_data`: `x` is raw ADC counts, `y` is kg, `z` is N
+
+The hardware startup file starts ADS1115 on I2C2 at address `0x48` and starts
+`tv3_load_cell_telemetry`. The telemetry module defaults to ADS1115
+`adc_report` instance `1`, differential channels A0-A1, and `10 Hz` publication.
+The startup file also explicitly requests `NAMED_VALUE_FLOAT` and `DEBUG_VECT`
+at `10 Hz` on the USB MAVLink device `/dev/ttyACM0`, which is the link QGC uses
+when the Cube is plugged in over USB.
+Before the scale is calibrated, `lc_kg` remains zero because `RK_LC_KG_SC`
+defaults to `0`.
+
+Calibrate from QGC's MAVLink Console or the PX4 shell:
+
+```sh
+tv3_load_cell_telemetry status
+tv3_load_cell_telemetry tare
+# place a known mass on the load cell
+tv3_load_cell_telemetry calibrate 2.000
+param save
+```
+
+`tare` stores the current raw differential count in `RK_LC_TARE`. `calibrate`
+computes `RK_LC_KG_SC` as `known_mass_kg / (current_raw - tare)`. If the kg
+reading moves in the wrong direction, swap the differential channel polarity or
+use the negative scale produced by calibrating in that orientation.
+
+If QGC is connected through a radio instead of USB, run `mavlink status` and
+repeat the stream commands for that active serial device, for example:
+
+```sh
+mavlink stream -d /dev/ttyS0 -s NAMED_VALUE_FLOAT -r 10
+mavlink stream -d /dev/ttyS0 -s DEBUG_VECT -r 10
+```
 
 ## Configure And Verify Parameters
 
@@ -164,9 +201,9 @@ tv3/airframes/tv3_v1.params
 
 The main generated parameter groups are:
 
-- `RK_*`: rocket state machine, ignition, load cell, mass, TVC, and guidance
+- `RK_*`: tv3 state machine, ignition, load cell, mass, TVC, and guidance
   values
-- `CA_RK_*`: rocket control-allocation geometry and thrust values
+- `CA_RK_*`: tv3 control-allocation geometry and thrust values
 
 Before field use, verify at least:
 
@@ -205,7 +242,7 @@ Before launch-day use, confirm:
 - TV3 modules start without shell errors
 - QGC can connect over USB and over the intended telemetry link
 - QGC shows the generated `RK_*` and `CA_RK_*` parameters
-- `rocket_mode_manager status` reports the expected state
+- `tv3_mode_manager status` reports the expected state
 - load-cell tare and scale are measured with known loads
 - no-thrust false positives are rejected
 - igniter output continuity and timing are verified without live motors
@@ -231,7 +268,7 @@ Before arming:
 - verify QGC link quality, battery status, sensor status, and GPS/RTK status if
   used
 - check QGC messages for TV3 startup errors
-- run `rocket_mode_manager status`
+- run `tv3_mode_manager status`
 - confirm the vehicle is not reporting a TV3 fault state
 - confirm `TV3 Abort` and `TV3 Reset` are available in QGC
 - confirm the range-safe arming and pyrotechnic controls are in the expected

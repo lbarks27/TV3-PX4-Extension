@@ -36,7 +36,7 @@ class MotorCatalogTests(unittest.TestCase):
             output = root / "output"
 
             write_csv(
-                source / "Apogee_motor_inventory.csv",
+                source / "motor_inventory.csv",
                 [
                     "manufacturer",
                     "designation",
@@ -107,30 +107,36 @@ class MotorCatalogTests(unittest.TestCase):
             report_json = json.loads((output / "validation_report.json").read_text())
             self.assertEqual(report_json["summary"]["motors_active"], 1)
 
-    def test_thrust_curve_repo_is_valid(self) -> None:
+    def test_config_thrust_curves_are_valid(self) -> None:
         module = load_module(Path("tools/generate_motor_catalog.py"))
 
-        source = Path(__file__).resolve().parents[2] / "vendor" / "Thrust-Curves-Apogee"
-        if not source.exists():
-            self.skipTest("thrust-curves repo is not bootstrapped")
+        source = Path(__file__).resolve().parents[1] / "config" / "thrust_curves"
+        self.assertTrue(source.exists())
 
         with TemporaryDirectory() as tmp:
             output = Path(tmp) / "output"
             report = module.generate_catalog(source, output)
 
-            self.assertGreater(report["summary"]["motors_total"], 0)
-            self.assertGreater(report["summary"]["motors_active"], 0)
-            self.assertGreaterEqual(report["summary"]["motors_rejected"], 0)
+            self.assertEqual(report["summary"]["motors_total"], 3)
+            self.assertEqual(report["summary"]["motors_active"], 3)
+            self.assertEqual(report["summary"]["motors_rejected"], 0)
 
             with (output / "catalog.csv").open() as stream:
                 catalog_rows = list(csv.DictReader(stream))
-            self.assertIn("motor_id", catalog_rows[0])
-            self.assertTrue(any(
-                row["manufacturer"] == "Apogee" and row["designation"] == "F10" and row["active"] == "1"
+
+            expected = {
+                ("AeroTech", "G8"),
+                ("AeroTech", "G12"),
+                ("Apogee", "F10"),
+            }
+            active_rows = {
+                (row["manufacturer"], row["designation"])
                 for row in catalog_rows
-            ))
-            self.assertTrue(any((output / row["motor_id"] / "curve.csv").exists() for row in catalog_rows if row["active"] == "1"))
-            self.assertTrue(any((output / row["motor_id"] / "specs.csv").exists() for row in catalog_rows if row["active"] == "1"))
+                if row["active"] == "1"
+            }
+            self.assertEqual(active_rows, expected)
+            self.assertTrue(all((output / row["motor_id"] / "curve.csv").exists() for row in catalog_rows if row["active"] == "1"))
+            self.assertTrue(all((output / row["motor_id"] / "specs.csv").exists() for row in catalog_rows if row["active"] == "1"))
 
 
 if __name__ == "__main__":

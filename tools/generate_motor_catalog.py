@@ -12,8 +12,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TV3_ROOT = REPO_ROOT.parent
-DEFAULT_SOURCE = TV3_ROOT / "vendor" / "Thrust-Curves-Apogee"
+DEFAULT_SOURCE = REPO_ROOT / "config" / "thrust_curves"
 
 
 @dataclass
@@ -69,11 +68,6 @@ def load_inventory(path: Path) -> list[dict[str, str]]:
 
 
 def report_path(path: Path) -> str:
-    try:
-        return str(path.relative_to(TV3_ROOT))
-    except ValueError:
-        pass
-
     try:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
@@ -293,7 +287,7 @@ def write_motor_assets(output_root: Path, result: ValidationResult, specs: Motor
 
 
 def generate_catalog(source_root: Path, output_root: Path) -> dict[str, object]:
-    inventory_path = source_root / "Apogee_motor_inventory.csv"
+    inventory_path = source_root / "motor_inventory.csv"
     rows = load_inventory(inventory_path)
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -331,7 +325,7 @@ def generate_catalog(source_root: Path, output_root: Path) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="Path to the thrust-curves repository")
+    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="Path to config/thrust_curves source data")
     parser.add_argument("--output", type=Path, required=True, help="Output directory for normalized catalog assets")
     args = parser.parse_args()
 

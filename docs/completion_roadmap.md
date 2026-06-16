@@ -119,6 +119,12 @@ Work:
 - Add ADC replay tests using recorded or synthetic load-cell traces.
 - Add a bench calibration report template.
 
+Exit script:
+
+```bash
+./scripts/check_propulsion_semantics.sh
+```
+
 Exit criteria:
 
 - SIH shows reference-thrust ignition and load-cell-confirmed ignition using the same state transitions.

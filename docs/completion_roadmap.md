@@ -71,6 +71,12 @@ Pass criteria:
 - Position error stays within `acceptance_m` for at least `review.min_hover_s`.
 - Allocator saturation is logged without sustained uncontrolled saturation.
 
+Exit script:
+
+```bash
+./scripts/check_hover_window.sh
+```
+
 ## Phase 2: Replace Provisional Physical Data
 
 Goal: manifests represent the real vehicles closely enough for simulation and control design.
@@ -80,13 +86,27 @@ Work:
 - Fill measured mass, CG, inertia, rail, and torque-limit data.
 - Fill engine mount positions, thrust axes, TVC/splay axes, trims, backlash, and slew rates.
 - Fill load-cell channel maps, tare, scale, noise, and timeout data.
-- Add schema validation tests for measured fields and unit conventions.
+- Promote `data_status.fields` entries from `preliminary` or `placeholder` to `measured` as bench evidence arrives.
+
+Infrastructure now in repo (no measured numbers required):
+
+- Machine-readable intake schema: `config/schemas/vehicle_intake_schema.yaml`
+- Manifest validator with unit checks and PX4 param parity: `tools/validate_vehicle_manifest.py`
+- Both manifests declare `data_status.flight_ready: false` and per-field provenance
+- Generator rejects manifests that fail intake validation
+
+Exit script (structural gate; passes before measured data exists):
+
+```bash
+./scripts/check_physical_manifests.sh
+```
 
 Exit criteria:
 
 - Both vehicle manifests validate against the schema.
-- Generated PX4 params match measured geometry and actuator limits.
+- Generated PX4 params match manifest geometry and actuator limits.
 - Remaining placeholders are clearly labeled as non-flight values.
+- `data_status.flight_ready` becomes `true` only after measured fields are promoted and revalidated.
 
 ## Phase 3: Propulsion And Load-Cell Semantics
 

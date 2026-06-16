@@ -20,6 +20,85 @@ fi
 
 mkdir -p "${WORK_ROOT}"
 
+if [ "${TV3_REUSE_PX4_WORKTREE:-0}" = "1" ] && [ -x "${WORKTREE}/build/px4_sitl_default/bin/px4" ]; then
+	python3 - "${REPO_ROOT}" "${WORKTREE}" "${VEHICLE_CONFIG}" "${FLIGHT_PROFILE}" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+repo_root = Path(sys.argv[1])
+worktree = Path(sys.argv[2])
+vehicle_config = Path(sys.argv[3])
+flight_profile = Path(sys.argv[4]) if sys.argv[4] else None
+generated_assets = repo_root / "build/barebones"
+generator_args = [
+	sys.executable,
+	str(repo_root / "tools/generate_vehicle_assets.py"),
+	"--vehicle",
+	str(vehicle_config),
+	"--output",
+	str(generated_assets),
+]
+if flight_profile is not None:
+	generator_args.extend(["--flight-profile", str(flight_profile)])
+subprocess.run(generator_args, check=True, stdout=subprocess.DEVNULL)
+PY
+
+	if [ -d "${REPO_ROOT}/overlay/ROMFS/init.d-posix" ]; then
+		rsync -a "${REPO_ROOT}/overlay/ROMFS/init.d-posix/" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/" >/dev/null 2>&1
+	fi
+
+	GENERATED_PARAM_FILE=$(find "${REPO_ROOT}/build/barebones/runtime/fs/microsd/tv3/airframes" -name '*.params' -print -quit 2>/dev/null || true)
+	if [ -n "${GENERATED_PARAM_FILE}" ]; then
+		python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_common.post" <<'PY'
+from pathlib import Path
+import sys
+
+params = Path(sys.argv[1])
+post_path = Path(sys.argv[2])
+guidance_enabled = False
+for raw_line in params.read_text().splitlines():
+	fields = raw_line.split("\t")
+	if len(fields) >= 4 and fields[2] == "RK_GD_ENABLE":
+		guidance_enabled = float(fields[3]) != 0.0
+		break
+
+lines = post_path.read_text().splitlines()
+lines = [line for line in lines if line.strip() != "tv3_guidance start"]
+
+if guidance_enabled:
+    insert_after = "tv3_mode_manager start"
+    try:
+        index = lines.index(insert_after) + 1
+    except ValueError:
+        index = len(lines)
+    lines.insert(index, "tv3_guidance start")
+
+post_path.write_text("\n".join(lines) + "\n")
+PY
+
+		python3 - "${GENERATED_PARAM_FILE}" "${WORKTREE}/ROMFS/px4fmu_common/init.d-posix/airframes/tv3_common.inc" <<'PY'
+from pathlib import Path
+import sys
+
+params = Path(sys.argv[1])
+target = Path(sys.argv[2])
+lines = [
+	"param set-default CA_ROTOR_COUNT 0",
+	"param set-default CA_SV_CS_COUNT 0",
+]
+for raw_line in params.read_text().splitlines():
+	fields = raw_line.split("\t")
+	if len(fields) >= 4:
+		lines.append(f"param set-default {fields[2]} {fields[3]}")
+target.write_text("\n".join(lines) + "\n")
+PY
+	fi
+
+	printf '%s\n' "${WORKTREE}"
+	exit 0
+fi
+
 git -C "${VENDOR_DIR}" worktree prune >/dev/null 2>&1 || true
 git -C "${VENDOR_DIR}" worktree remove --force "${WORKTREE}" >/dev/null 2>&1 || true
 rm -rf "${WORKTREE}"

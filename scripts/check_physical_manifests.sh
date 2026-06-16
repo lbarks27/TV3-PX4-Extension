@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+
+cd "${REPO_ROOT}"
+
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+
+./tools/validate_vehicle_manifest.py
+
+for vehicle in config/vehicles/tv3_v1.yaml config/vehicles/tv3_lander_v1.yaml; do
+	./tools/generate_vehicle_assets.py --vehicle "${vehicle}" --output "${REPO_ROOT}/build/physical_manifest/$(basename "${vehicle}" .yaml)"
+done
+
+printf 'Phase 2 physical-manifest gate passed (manifests validated; flight_ready remains false until measured data is supplied)\n'

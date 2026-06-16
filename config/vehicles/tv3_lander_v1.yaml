@@ -1,5 +1,21 @@
 name: tv3_lander_v1
 description: TV3 three-engine splay-throttle landing vehicle for PX4 SIH validation.
+data_status:
+  flight_ready: false
+  summary: Schema-placeholder geometry and actuator data for SIH gates; measured mass, CG, inertia, and load-cell calibration still required.
+  fields:
+    vehicle.body_mass_kg: preliminary
+    vehicle.body_com_x_m: preliminary
+    vehicle.motor_com_x_m: preliminary
+    vehicle.motor_loaded_mass_kg: preliminary
+    vehicle.motor_dry_mass_kg: preliminary
+    vehicle.rail_length_m: preliminary
+    vehicle.torque_limits_nm: preliminary
+    hardware.load_cell.calibration: placeholder
+    physical_model.links: placeholder
+    propulsion.engines: placeholder
+    propulsion.engines.position_m: placeholder
+    propulsion.engines.gimbal: placeholder
 variant:
   role: three_engine_lander
   first_free_flight_gate: false
@@ -45,7 +61,7 @@ vehicle:
     pitch: 16.0
     yaw: 16.0
 physical_model:
-  status: schema_placeholder
+  status: placeholder
   reference_frame:
     origin: nozzle_exit_center
     x_axis: forward_along_airframe
@@ -78,6 +94,7 @@ propulsion:
   throttle:
     mechanism: splay_cosine_loss
     max_splay_deg: 35.0
+    slew_dps: 220.0
   engines:
     - id: engine_0
       motor_index: 0

@@ -11,7 +11,9 @@ guidance:
   enable: 1
   takeoff_alt_m: 8.0
   apex_alt_m: 18.0
-  pos_p: 0.14
+  pos_p: 0.18
+  tilt_gain: 0.28
+  tilt_max_deg: 28.0
   vel_max_m_s: 7.0
   vel_up_m_s: 4.5
   vel_dn_m_s: 3.0

@@ -1,5 +1,20 @@
 name: tv3_v1
 description: Swerve Vector Control single-motor TVC tv3 baseline for PX4 v1.
+data_status:
+  flight_ready: false
+  summary: Provisional CAD-derived masses and inertias for SIH and ascent tuning; not measured for flight.
+  fields:
+    vehicle.body_mass_kg: preliminary
+    vehicle.body_com_x_m: preliminary
+    vehicle.motor_com_x_m: preliminary
+    vehicle.motor_loaded_mass_kg: preliminary
+    vehicle.motor_dry_mass_kg: preliminary
+    vehicle.rail_length_m: preliminary
+    vehicle.torque_limits_nm: preliminary
+    hardware.load_cell.calibration: placeholder
+    physical_model.links: preliminary
+    physical_model.joints: preliminary
+    propulsion.engines: preliminary
 hardware:
   autopilot: cube_orange_plus
   carrier: mini_carrier
@@ -40,6 +55,34 @@ vehicle:
   torque_limits_nm:
     pitch: 10.0
     yaw: 10.0
+propulsion:
+  engine_count: 1
+  ignition:
+    mode: load_cell_confirmed_sequence
+    sequence: [0]
+    dwell_ms: 0
+    timeout_ms: 2000
+    confirmation_threshold_n: 10.0
+  throttle:
+    mechanism: tvc_gimbal
+    max_splay_deg: 5.0
+  engines:
+    - id: engine_0
+      motor_index: 0
+      ignition_output_function: 450
+      load_cell_channel: 0
+      position_m: [0.15, 0.0, 0.0]
+      thrust_axis: [1.0, 0.0, 0.0]
+      pitch_axis: [0.0, -1.0, 0.0]
+      yaw_axis: [0.0, 0.0, -1.0]
+      thrust_fraction: 1.0
+      gimbal:
+        pitch_max_deg: 5.0
+        yaw_max_deg: 5.0
+        splay_max_deg: 5.0
+        slew_dps: 250.0
+        pitch_trim: 0.0
+        yaw_trim: 0.0
 physical_model:
   status: preliminary
   reference_frame:
@@ -187,3 +230,8 @@ guidance:
   land_n_m: 0.0
   land_e_m: 0.0
   land_d_m: 0.0
+mission_profile:
+  first_free_flight_gate: single_engine_ascent
+  required_sim_gates:
+    - single_engine_ascent
+    - sih_force_response

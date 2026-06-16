@@ -187,9 +187,9 @@ class VehicleAssetTests(unittest.TestCase):
 
     def test_vehicle_intake_schema_exists(self) -> None:
         schema = Path("config/schemas/vehicle_intake_schema.yaml").read_text()
-        self.assertIn("mass, CG, inertia", schema)
-        self.assertIn("splay/cosine-loss throttle mechanism", schema)
-        self.assertIn("load-cell ADC", schema)
+        self.assertIn("data_status_values", schema)
+        self.assertIn("param_parity", schema)
+        self.assertIn("unit_vec3", schema)
 
     def test_flight_profile_schema_and_examples_exist(self) -> None:
         schema = Path("config/schemas/flight_profile_schema.yaml").read_text()

@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-# Hawkeye fixed-wing slot: mirror_axes=0 (tailsitter mirrors a full mesh across X).
+# Hawkeye fixed-wing slot: mirror_axes=0 (multicopter slots mirror quarter meshes).
+# TV3 SIH reports MAV_TYPE_ROCKET in firmware, but Hawkeye 0.3.x falls back to quad
+# for unknown types. run_sitl_sih.sh sets MAV_TYPE_FIXED_WING during visual runs so
+# Hawkeye keeps this px4_fixed_wing.obj override once MAVLink connects.
 # TV3_HAWKEYE_MESH_ROT presets:
 #   tv3_hover    - default: Fusion +Z long axis -> OBJ +Y for upright SIH hover in Hawkeye -fw
 #   tv3_fw       - legacy body-frame mapping (usually appears on its side)

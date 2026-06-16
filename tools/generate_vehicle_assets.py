@@ -38,6 +38,8 @@ GUIDANCE_KEYS = {
     "land_e_m",
     "land_d_m",
     "sim_groundtruth_fallback",
+    "tilt_gain",
+    "tilt_max_deg",
 }
 LOGGER_TOPICS = [
     ("# Core PX4 state", None),
@@ -173,32 +175,30 @@ def ignition_sequence(vehicle: dict, engines: list[dict]) -> list[int]:
     return [int(value) for value in sequence]
 
 
-def validate_vehicle(vehicle: dict) -> None:
-    for section in ("name", "hardware", "vehicle", "controller", "state_machine", "motor_selection", "guidance"):
-        if section not in vehicle:
-            raise ValueError(f"vehicle manifest missing required section: {section}")
+def _validator_module():
+    import importlib.util
+    import sys
 
-    engines = vehicle_engines(vehicle)
-    if not engines:
-        raise ValueError("vehicle manifest must define at least one engine")
-    if len(engines) > MAX_ENGINES:
-        raise ValueError(f"vehicle manifest supports at most {MAX_ENGINES} engines")
+    validator_path = Path(__file__).resolve().parent / "validate_vehicle_manifest.py"
+    spec = importlib.util.spec_from_file_location("validate_vehicle_manifest", validator_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"unable to load validator module from {validator_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
-    seen_ids = set()
-    for index, engine in enumerate(engines):
-        for key in ("id", "motor_index", "position_m", "thrust_axis", "pitch_axis", "yaw_axis", "thrust_fraction", "gimbal"):
-            if key not in engine:
-                raise ValueError(f"engine {index} missing required field: {key}")
-        if engine["id"] in seen_ids:
-            raise ValueError(f"duplicate engine id: {engine['id']}")
-        seen_ids.add(engine["id"])
-        for key in ("position_m", "thrust_axis", "pitch_axis", "yaw_axis"):
-            if len(engine[key]) != 3:
-                raise ValueError(f"{engine['id']} {key} must have exactly 3 values")
 
-    sequence = ignition_sequence(vehicle, engines)
-    if sorted(sequence) != list(range(len(engines))):
-        raise ValueError("ignition sequence must contain each engine index exactly once")
+def validate_vehicle(vehicle: dict, vehicle_path: Path | None = None) -> None:
+    validator = _validator_module()
+    manifest_path = vehicle_path or Path("<in-memory>")
+    schema = validator.load_yaml(validator.DEFAULT_SCHEMA)
+    report = validator.validate_manifest(vehicle, manifest_path, schema)
+    if report.passed:
+        return
+
+    failures = [f"{check.name}: {check.detail}" for check in report.checks if not check.passed]
+    raise ValueError("vehicle manifest failed intake validation:\n  - " + "\n  - ".join(failures))
 
 
 def write_px4_params(vehicle: dict, path: Path) -> None:
@@ -361,6 +361,8 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_GD_LAND_E", g("land_e_m", 0.0), 9)
     append_param(lines, "RK_GD_LAND_D", g("land_d_m", 0.0), 9)
     append_param(lines, "RK_GD_SIM_GT", g("sim_groundtruth_fallback", 0), 6)
+    append_param(lines, "RK_ATT_TILT_GAIN", g("tilt_gain", 0.12), 9)
+    append_param(lines, "RK_ATT_TILT_MAX", g("tilt_max_deg", 20.0), 9)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
@@ -465,7 +467,7 @@ def generate_assets(vehicle_path: Path, output_root: Path, flight_profile_path: 
     vehicle = load_vehicle(vehicle_path)
     if flight_profile_path is not None:
         vehicle = apply_flight_profile(vehicle, load_flight_profile(flight_profile_path), flight_profile_path)
-    validate_vehicle(vehicle)
+    validate_vehicle(vehicle, vehicle_path)
     write_runtime_assets(vehicle, output_root / "runtime")
 
 

@@ -212,16 +212,16 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("required_sim_gates", profile["mission_profile"])
 
     def test_allocator_reachability_for_lander(self) -> None:
-        allocator = load_module(Path("tools/tv3_allocator.py"))
-        vehicle = allocator.yaml.safe_load(Path("config/vehicles/tv3_lander_v1.yaml").read_text())
+        allocator = load_module(Path("tools/tv3_control_allocator.py"))
+        vehicle = allocator.load_manifest(Path("config/vehicles/tv3_lander_v1.yaml"))
         engines = allocator.engines_from_vehicle(vehicle)
 
         reachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 620.0)
-        self.assertTrue(reachable["reachable"], reachable)
+        self.assertTrue(reachable.reachable, reachable)
 
         unreachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 100.0)
-        self.assertFalse(unreachable["reachable"])
-        self.assertEqual("net thrust outside splay envelope", unreachable["reason"])
+        self.assertFalse(unreachable.reachable)
+        self.assertEqual(allocator.REASON_THRUST_ENVELOPE, unreachable.reason)
 
     def test_sitl_airframes_share_common_defaults(self) -> None:
         common = Path("overlay/ROMFS/init.d-posix/airframes/tv3_common.inc").read_text()

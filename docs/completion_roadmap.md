@@ -140,10 +140,23 @@ Work:
 - Cover nominal, saturated, failed-engine, low-thrust, high-thrust, and burnout cases.
 - Keep unreachable results explicit in logs.
 
+Exit script:
+
+```bash
+./scripts/check_control_mixer.sh
+```
+
 Exit criteria:
 
 - Flight mixer and host allocator agree on representative cases.
 - Hover and landing guidance can query reachability before committing to a solution.
+
+Infrastructure now in repo (structural gate; full envelope proof still needs measured actuator data):
+
+- Shared constrained solver: `tools/tv3_control_allocator.py`
+- CLI reachability check: `tools/tv3_allocator.py`
+- Scenario coverage: nominal, saturated, failed-engine, low/high thrust, burnout, and guidance reachability tests
+- Guidance publishes `control_solution_valid` and `control_unreachable_reason` in `tv3_guidance_status`
 
 ## Phase 5: Guidance And Monte Carlo
 

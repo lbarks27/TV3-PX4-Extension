@@ -32,8 +32,16 @@ float32 commanded_climb_rate_m_s
 float32 commanded_yaw_rad
 
 bool thrust_solution_valid
+bool control_solution_valid
+uint8 CONTROL_OK = 0
+uint8 CONTROL_THRUST_ENVELOPE = 1
+uint8 CONTROL_TORQUE_ENVELOPE = 2
+uint8 CONTROL_NO_ACTIVE_ENGINES = 3
+uint8 control_unreachable_reason
 float32 available_thrust_n
 float32 required_thrust_n
 float32 thrust_margin_n
+float32 estimated_torque_pitch_nm
+float32 estimated_torque_yaw_nm
 float32 remaining_impulse_ns
 float32 remaining_delta_v_m_s

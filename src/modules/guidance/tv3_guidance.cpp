@@ -184,6 +184,9 @@ private:
 	void update_parameters()
 	{
 		_enabled = read_param_int32("RK_GD_ENABLE", _enabled);
+		_splay_max_deg = read_param_float("RK_SPLAY_MAX_DEG", _splay_max_deg);
+		_torque_pitch_max = read_param_float("RK_TQ_P_MAX", _torque_pitch_max);
+		_torque_yaw_max = read_param_float("RK_TQ_Y_MAX", _torque_yaw_max);
 		_takeoff_alt_m = read_param_float("RK_GD_TAKE_ALT", _takeoff_alt_m);
 		_apex_alt_m = read_param_float("RK_GD_APEX_ALT", _apex_alt_m);
 		_position_gain = read_param_float("RK_GD_POS_P", _position_gain);
@@ -226,13 +229,18 @@ private:
 						 _motor_reference.burn_fraction, 0.f, 1.f)), 0.f);
 		_remaining_delta_v_m_s = mass_kg > 0.01f ? _remaining_impulse_ns / mass_kg : 0.f;
 		_last_required_thrust_n = 0.f;
+		_estimated_torque_pitch_nm = 0.f;
+		_estimated_torque_yaw_nm = 0.f;
 		_thrust_solution_valid = _motor_reference.loaded && mass_kg > 0.01f;
+		_control_solution_valid = _thrust_solution_valid;
+		_control_unreachable_reason = tv3_guidance_status_s::CONTROL_OK;
 	}
 
 	bool require_thrust_solution(uint8_t candidate_phase)
 	{
 		if (!_thrust_solution_valid) {
 			_last_required_thrust_n = 0.f;
+			_control_solution_valid = false;
 			enter_no_solution_state();
 			return false;
 		}
@@ -247,11 +255,78 @@ private:
 		const bool thrust_ok = _available_thrust_n >= minimum_thrust_n;
 		const bool impulse_ok = _remaining_impulse_ns >= math::max(_min_remaining_impulse_ns, 0.f);
 		_thrust_solution_valid = thrust_ok && impulse_ok;
+		_control_solution_valid = _thrust_solution_valid;
 
 		if (!_thrust_solution_valid) {
 			_last_required_thrust_n = 0.f;
 			enter_no_solution_state();
 			return false;
+		}
+
+		if (!require_control_solution()) {
+			_thrust_solution_valid = false;
+			enter_no_solution_state();
+			return false;
+		}
+
+		return true;
+	}
+
+	bool require_control_solution()
+	{
+		_control_solution_valid = _thrust_solution_valid;
+		_control_unreachable_reason = tv3_guidance_status_s::CONTROL_OK;
+		_estimated_torque_pitch_nm = 0.f;
+		_estimated_torque_yaw_nm = 0.f;
+
+		if (!_control_solution_valid) {
+			return false;
+		}
+
+		float max_thrust_n = 0.f;
+		float min_thrust_n = 0.f;
+		const float cos_splay = cosf(_splay_max_deg * kDegToRad);
+		bool have_active_engine = false;
+
+		for (int i = 0; i < _motor_reference.engine_count && i < 4; ++i) {
+			if ((_motor_reference.active_mask & (1u << i)) == 0) {
+				continue;
+			}
+
+			const float thrust = math::max(_motor_reference.expected_thrust_n_engine[i], 0.f);
+			max_thrust_n += thrust;
+			min_thrust_n += thrust * cos_splay;
+			have_active_engine = true;
+		}
+
+		if (!have_active_engine) {
+			_control_solution_valid = false;
+			_control_unreachable_reason = tv3_guidance_status_s::CONTROL_NO_ACTIVE_ENGINES;
+			return false;
+		}
+
+		const float required_thrust_n = math::max(_last_required_thrust_n, 0.f);
+		if (required_thrust_n > max_thrust_n + 1.f || required_thrust_n + 1.f < min_thrust_n) {
+			_control_solution_valid = false;
+			_control_unreachable_reason = tv3_guidance_status_s::CONTROL_THRUST_ENVELOPE;
+			return false;
+		}
+
+		const float horiz_speed = sqrtf(_last_velocity_sp(0) * _last_velocity_sp(0)
+						+ _last_velocity_sp(1) * _last_velocity_sp(1));
+		if (horiz_speed > 0.5f) {
+			const float mass_kg = math::max(_motor_reference.expected_vehicle_mass_kg, 0.1f);
+			const float lateral_accel = mass_kg * math::min(horiz_speed * _position_gain, 20.f);
+			const float lever_arm_m = 0.12f;
+			const float estimated_torque = lateral_accel * lever_arm_m;
+			_estimated_torque_pitch_nm = estimated_torque;
+			_estimated_torque_yaw_nm = estimated_torque;
+
+			if (estimated_torque > _torque_pitch_max + 1e-3f || estimated_torque > _torque_yaw_max + 1e-3f) {
+				_control_solution_valid = false;
+				_control_unreachable_reason = tv3_guidance_status_s::CONTROL_TORQUE_ENVELOPE;
+				return false;
+			}
 		}
 
 		return true;
@@ -261,6 +336,7 @@ private:
 	{
 		if (!_thrust_solution_valid) {
 			_last_required_thrust_n = 0.f;
+			_control_solution_valid = false;
 			return;
 		}
 
@@ -280,6 +356,10 @@ private:
 		const float a_z_cmd = _position_gain * z_error + vel_gain * vz_error;
 
 		_last_required_thrust_n = math::constrain(mass_kg * (kGravityMps2 - a_z_cmd), 0.f, _available_thrust_n);
+		_control_solution_valid = require_control_solution();
+		if (!_control_solution_valid) {
+			_thrust_solution_valid = false;
+		}
 	}
 
 	void enter_no_solution_state()
@@ -556,9 +636,13 @@ private:
 		status.commanded_climb_rate_m_s = -_last_velocity_sp(2);
 		status.commanded_yaw_rad = _current_yaw_sp;
 		status.thrust_solution_valid = _thrust_solution_valid;
+		status.control_solution_valid = _control_solution_valid;
+		status.control_unreachable_reason = _control_unreachable_reason;
 		status.available_thrust_n = _available_thrust_n;
 		status.required_thrust_n = _last_required_thrust_n;
 		status.thrust_margin_n = _available_thrust_n - _last_required_thrust_n;
+		status.estimated_torque_pitch_nm = _estimated_torque_pitch_nm;
+		status.estimated_torque_yaw_nm = _estimated_torque_yaw_nm;
 		status.remaining_impulse_ns = _remaining_impulse_ns;
 		status.remaining_delta_v_m_s = _remaining_delta_v_m_s;
 		_status_pub.publish(status);
@@ -647,6 +731,9 @@ private:
 	float _min_twr{1.05f};
 	float _landing_twr{1.15f};
 	float _min_remaining_impulse_ns{0.f};
+	float _splay_max_deg{5.f};
+	float _torque_pitch_max{10.f};
+	float _torque_yaw_max{10.f};
 
 	MissionPoint _mission_waypoints[kMissionWaypointCount]{
 		{make_vector(60.f, 0.f, -60.f), 15.f, 25.f},
@@ -665,7 +752,11 @@ private:
 	Vector3f _last_velocity_sp{0.f, 0.f, 0.f};
 	float _current_yaw_sp{0.f};
 	bool _thrust_solution_valid{false};
+	bool _control_solution_valid{false};
+	uint8_t _control_unreachable_reason{tv3_guidance_status_s::CONTROL_OK};
 	float _available_thrust_n{0.f};
+	float _estimated_torque_pitch_nm{0.f};
+	float _estimated_torque_yaw_nm{0.f};
 	float _last_required_thrust_n{0.f};
 	float _remaining_impulse_ns{0.f};
 	float _remaining_delta_v_m_s{0.f};

@@ -202,6 +202,7 @@ class VehicleAssetTests(unittest.TestCase):
             "lander_hover_window",
             "lander_waypoint_track",
             "lander_abort_fault_path",
+            "lander_impossible_guidance",
         ]
         for name in profiles:
             profile = yaml.safe_load(Path(f"config/flight_profiles/{name}.yaml").read_text())

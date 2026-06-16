@@ -167,10 +167,23 @@ Work:
 - Extend guidance checks from simple thrust margin to remaining impulse, available thrust over time, torque authority, landing reserve, and abort corridor.
 - Add deterministic scenario tests, then Monte Carlo sweeps over mass, thrust curves, wind, sensor noise, ignition delay, and actuator lag.
 
+Exit script:
+
+```bash
+./scripts/check_guidance_monte_carlo.sh
+```
+
 Exit criteria:
 
 - `tv3_lander_v1` can complete launch, waypoint, hover/descend, and landing scenarios in SIH with logged margins.
 - Guidance reports no-solution for impossible profiles.
+
+Infrastructure now in repo (structural gate; full SIH mission proof still required):
+
+- Shared guidance envelope model: `tools/tv3_guidance_envelope.py`
+- Lightweight Monte Carlo runner: `tools/run_guidance_monte_carlo.py`
+- Impossible-profile fixture: `config/flight_profiles/lander_impossible_guidance.yaml`
+- Guidance publishes impulse, landing-reserve, and abort-corridor margins in `tv3_guidance_status`
 
 ## Phase 6: Bench And Hardware Gates
 

@@ -33,15 +33,29 @@ float32 commanded_yaw_rad
 
 bool thrust_solution_valid
 bool control_solution_valid
+bool landing_reserve_valid
+bool abort_corridor_valid
 uint8 CONTROL_OK = 0
 uint8 CONTROL_THRUST_ENVELOPE = 1
 uint8 CONTROL_TORQUE_ENVELOPE = 2
 uint8 CONTROL_NO_ACTIVE_ENGINES = 3
 uint8 control_unreachable_reason
+uint8 GUIDANCE_OK = 0
+uint8 GUIDANCE_IMPULSE = 1
+uint8 GUIDANCE_THRUST_MARGIN = 2
+uint8 GUIDANCE_LANDING_RESERVE = 3
+uint8 GUIDANCE_ABORT_CORRIDOR = 4
+uint8 GUIDANCE_CONTROL = 5
+uint8 guidance_unreachable_reason
 float32 available_thrust_n
 float32 required_thrust_n
 float32 thrust_margin_n
+float32 impulse_margin_ns
 float32 estimated_torque_pitch_nm
 float32 estimated_torque_yaw_nm
+float32 landing_delta_v_required_m_s
+float32 landing_delta_v_margin_m_s
+float32 abort_delta_v_required_m_s
+float32 abort_delta_v_margin_m_s
 float32 remaining_impulse_ns
 float32 remaining_delta_v_m_s

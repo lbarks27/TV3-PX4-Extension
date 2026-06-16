@@ -28,6 +28,8 @@ namespace
 {
 constexpr float kDegToRad = 0.017453292519943295769f;
 constexpr float kGravityMps2 = 9.80665f;
+constexpr float kLandingDeltaVMargin = 1.15f;
+constexpr float kAbortDeltaVMargin = 1.2f;
 constexpr size_t kMissionWaypointCount = 3;
 
 struct MissionPoint {
@@ -234,6 +236,14 @@ private:
 		_thrust_solution_valid = _motor_reference.loaded && mass_kg > 0.01f;
 		_control_solution_valid = _thrust_solution_valid;
 		_control_unreachable_reason = tv3_guidance_status_s::CONTROL_OK;
+		_landing_reserve_valid = _thrust_solution_valid;
+		_abort_corridor_valid = _thrust_solution_valid;
+		_guidance_unreachable_reason = tv3_guidance_status_s::GUIDANCE_OK;
+		_impulse_margin_ns = _remaining_impulse_ns - math::max(_min_remaining_impulse_ns, 0.f);
+		_landing_delta_v_required_m_s = 0.f;
+		_landing_delta_v_margin_m_s = 0.f;
+		_abort_delta_v_required_m_s = 0.f;
+		_abort_delta_v_margin_m_s = 0.f;
 	}
 
 	bool require_thrust_solution(uint8_t candidate_phase)
@@ -253,20 +263,76 @@ private:
 
 		const float minimum_thrust_n = mass_kg * kGravityMps2 * twr;
 		const bool thrust_ok = _available_thrust_n >= minimum_thrust_n;
-		const bool impulse_ok = _remaining_impulse_ns >= math::max(_min_remaining_impulse_ns, 0.f);
+		const bool impulse_ok = _impulse_margin_ns >= 0.f;
 		_thrust_solution_valid = thrust_ok && impulse_ok;
 		_control_solution_valid = _thrust_solution_valid;
 
 		if (!_thrust_solution_valid) {
 			_last_required_thrust_n = 0.f;
+			_guidance_unreachable_reason = impulse_ok
+						       ? tv3_guidance_status_s::GUIDANCE_THRUST_MARGIN
+						       : tv3_guidance_status_s::GUIDANCE_IMPULSE;
 			enter_no_solution_state();
 			return false;
 		}
 
 		if (!require_control_solution()) {
 			_thrust_solution_valid = false;
+			_guidance_unreachable_reason = tv3_guidance_status_s::GUIDANCE_CONTROL;
 			enter_no_solution_state();
 			return false;
+		}
+
+		if (!require_mission_envelope(candidate_phase)) {
+			_thrust_solution_valid = false;
+			enter_no_solution_state();
+			return false;
+		}
+
+		return true;
+	}
+
+	bool require_mission_envelope(uint8_t candidate_phase)
+	{
+		_landing_reserve_valid = true;
+		_abort_corridor_valid = true;
+		_landing_delta_v_required_m_s = 0.f;
+		_landing_delta_v_margin_m_s = 0.f;
+		_abort_delta_v_required_m_s = 0.f;
+		_abort_delta_v_margin_m_s = 0.f;
+
+		if (candidate_phase == tv3_guidance_status_s::PHASE_WAYPOINT_TRACK
+		    || candidate_phase == tv3_guidance_status_s::PHASE_LANDING_APPROACH) {
+			const float altitude_m = math::max(-(_last_target(2) - _origin(2)), 0.f);
+			_landing_delta_v_required_m_s = altitude_m > 1e-3f ? sqrtf(2.f * kGravityMps2 * altitude_m) : 0.f;
+			_landing_delta_v_margin_m_s = _remaining_delta_v_m_s - _landing_delta_v_required_m_s * kLandingDeltaVMargin;
+			_landing_reserve_valid = _landing_delta_v_margin_m_s >= 0.f;
+
+			if (!_landing_reserve_valid) {
+				_guidance_unreachable_reason = tv3_guidance_status_s::GUIDANCE_LANDING_RESERVE;
+				return false;
+			}
+		}
+
+		if (_mission_started && candidate_phase != tv3_guidance_status_s::PHASE_STANDBY
+		    && candidate_phase != tv3_guidance_status_s::PHASE_ABORT
+		    && candidate_phase != tv3_guidance_status_s::PHASE_COMPLETE) {
+			const Vector3f landing_global = _origin + _landing_point;
+			const Vector3f position{_local_position.x, _local_position.y, _local_position.z};
+			const Vector3f error = landing_global - position;
+			const float horizontal_distance_m = sqrtf(error(0) * error(0) + error(1) * error(1));
+			const float altitude_m = math::max(-error(2), 0.f);
+			const float vertical_dv = altitude_m > 1e-3f ? sqrtf(2.f * kGravityMps2 * altitude_m) : 0.f;
+			const float horizontal_dv = math::min(horizontal_distance_m * 0.15f, _max_velocity_m_s);
+			const float descent_dv = math::min(_max_descent_rate_m_s, _max_velocity_m_s) * 0.5f;
+			_abort_delta_v_required_m_s = vertical_dv + horizontal_dv + descent_dv;
+			_abort_delta_v_margin_m_s = _remaining_delta_v_m_s - _abort_delta_v_required_m_s * kAbortDeltaVMargin;
+			_abort_corridor_valid = _abort_delta_v_margin_m_s >= 0.f;
+
+			if (!_abort_corridor_valid) {
+				_guidance_unreachable_reason = tv3_guidance_status_s::GUIDANCE_ABORT_CORRIDOR;
+				return false;
+			}
 		}
 
 		return true;
@@ -637,12 +703,20 @@ private:
 		status.commanded_yaw_rad = _current_yaw_sp;
 		status.thrust_solution_valid = _thrust_solution_valid;
 		status.control_solution_valid = _control_solution_valid;
+		status.landing_reserve_valid = _landing_reserve_valid;
+		status.abort_corridor_valid = _abort_corridor_valid;
 		status.control_unreachable_reason = _control_unreachable_reason;
+		status.guidance_unreachable_reason = _guidance_unreachable_reason;
 		status.available_thrust_n = _available_thrust_n;
 		status.required_thrust_n = _last_required_thrust_n;
 		status.thrust_margin_n = _available_thrust_n - _last_required_thrust_n;
+		status.impulse_margin_ns = _impulse_margin_ns;
 		status.estimated_torque_pitch_nm = _estimated_torque_pitch_nm;
 		status.estimated_torque_yaw_nm = _estimated_torque_yaw_nm;
+		status.landing_delta_v_required_m_s = _landing_delta_v_required_m_s;
+		status.landing_delta_v_margin_m_s = _landing_delta_v_margin_m_s;
+		status.abort_delta_v_required_m_s = _abort_delta_v_required_m_s;
+		status.abort_delta_v_margin_m_s = _abort_delta_v_margin_m_s;
 		status.remaining_impulse_ns = _remaining_impulse_ns;
 		status.remaining_delta_v_m_s = _remaining_delta_v_m_s;
 		_status_pub.publish(status);
@@ -753,10 +827,18 @@ private:
 	float _current_yaw_sp{0.f};
 	bool _thrust_solution_valid{false};
 	bool _control_solution_valid{false};
+	bool _landing_reserve_valid{false};
+	bool _abort_corridor_valid{false};
 	uint8_t _control_unreachable_reason{tv3_guidance_status_s::CONTROL_OK};
+	uint8_t _guidance_unreachable_reason{tv3_guidance_status_s::GUIDANCE_OK};
 	float _available_thrust_n{0.f};
+	float _impulse_margin_ns{0.f};
 	float _estimated_torque_pitch_nm{0.f};
 	float _estimated_torque_yaw_nm{0.f};
+	float _landing_delta_v_required_m_s{0.f};
+	float _landing_delta_v_margin_m_s{0.f};
+	float _abort_delta_v_required_m_s{0.f};
+	float _abort_delta_v_margin_m_s{0.f};
 	float _last_required_thrust_n{0.f};
 	float _remaining_impulse_ns{0.f};
 	float _remaining_delta_v_m_s{0.f};

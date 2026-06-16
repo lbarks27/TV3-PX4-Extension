@@ -360,6 +360,36 @@ def review_ulog(ulog_path: Path, profile_path: Path) -> ReviewReport:
             )
         )
 
+        if "landing_reserve_valid" in guidance_status:
+            landing_invalid = bool(
+                np.any(
+                    (guidance_status["landing_reserve_valid"] == 0)
+                    & active_guidance
+                    & (guidance_status.get("landing_delta_v_margin_m_s", np.array([0.0])) < 0.0)
+                )
+            )
+            metrics["guidance_landing_reserve_invalid"] = landing_invalid
+            checks.append(
+                CheckResult(
+                    "guidance_landing_reserve",
+                    not landing_invalid,
+                    "landing reserve invalid during active guidance"
+                    if landing_invalid
+                    else "landing reserve remained valid",
+                )
+            )
+
+        if "impulse_margin_ns" in guidance_status:
+            impulse_logged = bool(np.any(np.isfinite(guidance_status["impulse_margin_ns"])))
+            metrics["guidance_impulse_margin_logged"] = impulse_logged
+            checks.append(
+                CheckResult(
+                    "guidance_impulse_margin",
+                    impulse_logged,
+                    "impulse margin logged" if impulse_logged else "impulse_margin_ns missing",
+                )
+            )
+
     passed = all(check.passed for check in checks)
     return ReviewReport(
         profile=str(profile_path),

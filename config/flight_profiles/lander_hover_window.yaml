@@ -9,6 +9,9 @@ scenario:
   simulated_only: true
 guidance:
   enable: 1
+  ascent_mode: hover_window
+  apogee_mode: skip
+  landing_mode: approach
   takeoff_alt_m: 8.0
   apex_alt_m: 18.0
   pos_p: 0.18
@@ -29,6 +32,8 @@ guidance:
   wp2_n_m: 0.0
   wp2_e_m: 0.0
   wp2_d_m: -10.0
+  wp2_mode: position_hold
+  wp2_hold_s: 3.0
   wp3_n_m: 0.0
   wp3_e_m: 0.0
   wp3_d_m: -8.0

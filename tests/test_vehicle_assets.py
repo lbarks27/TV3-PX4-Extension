@@ -58,6 +58,8 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("RK_IGN_TO_MS", generated_params)
             self.assertIn("RK_GD_TAKE_ALT", generated_params)
             self.assertIn("RK_GD_WP1_N", generated_params)
+            self.assertIn("RK_GD_ASCENT_MODE", generated_params)
+            self.assertIn("RK_GD_WP2_HOLD_S", generated_params)
             self.assertIn("RK_GD_TWR_MIN", generated_params)
             self.assertIn("RK_ABORT_GCS", generated_params)
             self.assertIn("RK_ENG_COUNT", generated_params)
@@ -177,6 +179,11 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertEqual("3.0", params["RK_GD_ACC_RAD"])
             self.assertEqual("0.0", params["RK_GD_WP1_N"])
             self.assertEqual("-8.0", params["RK_GD_WP1_D"])
+            self.assertEqual("1", params["RK_GD_ASCENT_MODE"])
+            self.assertEqual("1", params["RK_GD_APOGEE_MODE"])
+            self.assertEqual("0", params["RK_GD_LAND_MODE"])
+            self.assertEqual("1", params["RK_GD_WP2_MODE"])
+            self.assertEqual("3.0", params["RK_GD_WP2_HOLD_S"])
 
             runtime_extras = (output / "runtime" / "etc" / "extras.txt").read_text()
             self.assertIn("tv3_guidance start", runtime_extras)
@@ -184,6 +191,31 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("name: lander_hover_window", active_profile)
             self.assertIn("type: hover_window", active_profile)
             self.assertTrue((output / "runtime" / "etc" / "flight_profiles" / "lander_hover_window.yaml").exists())
+
+    def test_guidance_mode_params_from_waypoint_track_profile(self) -> None:
+        module = load_module(Path("tools/generate_vehicle_assets.py"))
+        vehicle = Path("config/vehicles/tv3_lander_v1.yaml")
+        profile = Path("config/flight_profiles/lander_waypoint_track.yaml")
+
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "generated"
+            module.generate_assets(vehicle, output, profile)
+
+            params = generated_param_values(output, "tv3_lander_v1")
+            self.assertEqual("0", params["RK_GD_ASCENT_MODE"])
+            self.assertEqual("0", params["RK_GD_APOGEE_MODE"])
+            self.assertEqual("0", params["RK_GD_LAND_MODE"])
+            self.assertEqual("0", params["RK_GD_WP1_MODE"])
+            self.assertEqual("0", params["RK_GD_WP2_MODE"])
+            self.assertEqual("0", params["RK_GD_WP3_MODE"])
+
+    def test_guidance_mode_value_mapping(self) -> None:
+        module = load_module(Path("tools/generate_vehicle_assets.py"))
+        self.assertEqual(1, module.guidance_mode_value(module.ASCENT_MODES, "hover_window", "launch_ascent"))
+        self.assertEqual(0, module.guidance_mode_value(module.APOGEE_MODES, None, "track"))
+        self.assertEqual(1, module.guidance_mode_value(module.WP_MODES, "position_hold", "fly_through"))
+        with self.assertRaises(ValueError):
+            module.guidance_mode_value(module.LANDING_MODES, "hover", "approach")
 
     def test_vehicle_intake_schema_exists(self) -> None:
         schema = Path("config/schemas/vehicle_intake_schema.yaml").read_text()
@@ -194,6 +226,9 @@ class VehicleAssetTests(unittest.TestCase):
     def test_flight_profile_schema_and_examples_exist(self) -> None:
         schema = Path("config/schemas/flight_profile_schema.yaml").read_text()
         self.assertIn("tv3_flight_profile_schema_v1", schema)
+        self.assertIn("ascent_mode", schema)
+        self.assertIn("wp2_mode", schema)
+        self.assertIn("wp2_hold_s", schema)
         self.assertIn("TV3_FLIGHT_PROFILE", Path("config/flight_profiles/README.md").read_text())
 
         profiles = [
@@ -239,6 +274,10 @@ class VehicleAssetTests(unittest.TestCase):
         self.assertIn("tv3_mode_manager start", post)
         self.assertIn("tv3_att_control start", post)
         self.assertNotIn("tv3_guidance start", post)
+
+        defaults = Path("overlay/ROMFS/init.d-posix/rc.tv3_defaults").read_text()
+        self.assertIn("RK_GD_ASCENT_MODE", defaults)
+        self.assertIn("RK_GD_WP2_HOLD_S", defaults)
 
         prepare = Path("scripts/prepare_px4_tree.sh").read_text()
         self.assertIn("tv3_guidance start", prepare)

@@ -9,6 +9,9 @@ scenario:
   simulated_only: true
 guidance:
   enable: 1
+  ascent_mode: launch_ascent
+  apogee_mode: track
+  landing_mode: approach
   takeoff_alt_m: 8.0
   apex_alt_m: 25.0
   pos_p: 0.12
@@ -27,6 +30,10 @@ guidance:
   wp2_n_m: 10.0
   wp2_e_m: -18.0
   wp2_d_m: -18.0
+  wp1_mode: fly_through
+  wp2_mode: position_hold
+  wp2_hold_s: 5.0
+  wp3_mode: fly_through
   wp3_n_m: -15.0
   wp3_e_m: 8.0
   wp3_d_m: -10.0

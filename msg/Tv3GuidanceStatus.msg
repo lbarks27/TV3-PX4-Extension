@@ -20,6 +20,19 @@ bool tv3_coasting
 uint8 tv3_mode
 uint8 waypoint_index
 uint8 waypoint_count
+uint8 WP_MODE_FLY_THROUGH = 0
+uint8 WP_MODE_POSITION_HOLD = 1
+uint8 waypoint_mode
+float32 waypoint_hold_remaining_s
+uint8 ASCENT_LAUNCH = 0
+uint8 ASCENT_HOVER_WINDOW = 1
+uint8 ascent_mode
+uint8 APOGEE_TRACK = 0
+uint8 APOGEE_SKIP = 1
+uint8 apogee_mode
+uint8 LANDING_APPROACH = 0
+uint8 LANDING_SKIP = 1
+uint8 landing_mode
 
 float32 target_n
 float32 target_e

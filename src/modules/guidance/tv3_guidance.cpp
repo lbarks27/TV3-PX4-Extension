@@ -32,10 +32,23 @@ constexpr float kLandingDeltaVMargin = 1.15f;
 constexpr float kAbortDeltaVMargin = 1.2f;
 constexpr size_t kMissionWaypointCount = 3;
 
+static constexpr uint8_t kAscentLaunch = 0;
+static constexpr uint8_t kAscentHoverWindow = 1;
+static constexpr uint8_t kApogeeTrack = 0;
+static constexpr uint8_t kApogeeSkip = 1;
+static constexpr uint8_t kLandingApproach = 0;
+static constexpr uint8_t kLandingSkip = 1;
+static constexpr uint8_t kWaypointFlyThrough = 0;
+static constexpr uint8_t kWaypointPositionHold = 1;
+
 struct MissionPoint {
 	Vector3f position{};
 	float acceptance_radius_m{15.f};
 	float cruise_speed_m_s{25.f};
+	uint8_t mode{kWaypointFlyThrough};
+	float hold_time_s{0.f};
+	bool hold_active{false};
+	hrt_abstime hold_start{0};
 };
 
 static void set_nan_trajectory(trajectory_setpoint_s &sp)
@@ -216,11 +229,49 @@ private:
 		_landing_point(1) = read_param_float("RK_GD_LAND_E", _landing_point(1));
 		_landing_point(2) = read_param_float("RK_GD_LAND_D", _landing_point(2));
 		_sim_groundtruth_fallback = read_param_int32("RK_GD_SIM_GT", _sim_groundtruth_fallback);
+		_ascent_mode = static_cast<uint8_t>(read_param_int32("RK_GD_ASCENT_MODE", _ascent_mode));
+		_apogee_mode = static_cast<uint8_t>(read_param_int32("RK_GD_APOGEE_MODE", _apogee_mode));
+		_landing_mode = static_cast<uint8_t>(read_param_int32("RK_GD_LAND_MODE", _landing_mode));
 
-		for (MissionPoint &waypoint : _mission_waypoints) {
-			waypoint.acceptance_radius_m = math::max(_acceptance_radius_m, 1.f);
-			waypoint.cruise_speed_m_s = math::min(math::max(_max_velocity_m_s, 1.f), 100.f);
+		load_waypoint_parameters(0, 1);
+		load_waypoint_parameters(1, 2);
+		load_waypoint_parameters(2, 3);
+	}
+
+	void load_waypoint_parameters(size_t index, int waypoint_number)
+	{
+		if (index >= kMissionWaypointCount) {
+			return;
 		}
+
+		MissionPoint &waypoint = _mission_waypoints[index];
+		char buffer[24];
+		const float default_cruise = math::min(math::max(_max_velocity_m_s, 1.f), 100.f);
+		const float default_acceptance = math::max(_acceptance_radius_m, 1.f);
+
+		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_MODE", waypoint_number);
+		waypoint.mode = static_cast<uint8_t>(read_param_int32(buffer, waypoint.mode));
+
+		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_HOLD_S", waypoint_number);
+		waypoint.hold_time_s = math::max(read_param_float(buffer, waypoint.hold_time_s), 0.f);
+
+		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_ACC_M", waypoint_number);
+		const float acceptance_override = read_param_float(buffer, 0.f);
+		waypoint.acceptance_radius_m = acceptance_override > 0.f ? acceptance_override : default_acceptance;
+
+		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_CRUISE_MS", waypoint_number);
+		const float cruise_override = read_param_float(buffer, 0.f);
+		waypoint.cruise_speed_m_s = cruise_override > 0.f ? cruise_override : default_cruise;
+	}
+
+	void clear_waypoint_hold_states()
+	{
+		for (MissionPoint &waypoint : _mission_waypoints) {
+			waypoint.hold_active = false;
+			waypoint.hold_start = 0;
+		}
+
+		_waypoint_hold_remaining_s = 0.f;
 	}
 
 	void update_thrust_envelope()
@@ -436,8 +487,13 @@ private:
 		_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
 	}
 
-	bool hover_window_lateral_target(Vector3f &target) const
+	bool ascent_uses_hover_window(Vector3f &target) const
 	{
+		if (_ascent_mode == kAscentHoverWindow) {
+			target = Vector3f{_mission_waypoints[1].position(0), _mission_waypoints[1].position(1), 0.f};
+			return true;
+		}
+
 		const Vector3f &wp1 = _mission_waypoints[0].position;
 		const Vector3f &wp2 = _mission_waypoints[1].position;
 		const Vector3f &wp3 = _mission_waypoints[2].position;
@@ -449,6 +505,67 @@ private:
 		}
 
 		return false;
+	}
+
+	bool update_active_waypoint(const Vector3f &position, hrt_abstime now)
+	{
+		if (_waypoint_index >= kMissionWaypointCount) {
+			return false;
+		}
+
+		MissionPoint &waypoint = _mission_waypoints[_waypoint_index];
+		const Vector3f target_global = _origin + waypoint.position;
+		const Vector3f error = target_global - position;
+		const float distance = error.norm();
+		_current_waypoint_mode = waypoint.mode;
+
+		if (waypoint.mode == kWaypointPositionHold && distance <= waypoint.acceptance_radius_m) {
+			if (!waypoint.hold_active) {
+				waypoint.hold_active = true;
+				waypoint.hold_start = now;
+			}
+
+			_last_target = target_global;
+			_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
+			_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
+
+			if (waypoint.hold_time_s > 0.f) {
+				const float elapsed_s = waypoint.hold_start != 0
+							  ? static_cast<float>(now - waypoint.hold_start) * 1e-6f
+							  : 0.f;
+				_waypoint_hold_remaining_s = math::max(waypoint.hold_time_s - elapsed_s, 0.f);
+
+				if (elapsed_s >= waypoint.hold_time_s) {
+					waypoint.hold_active = false;
+					waypoint.hold_start = 0;
+					++_waypoint_index;
+					_waypoint_hold_remaining_s = 0.f;
+				}
+			} else {
+				_waypoint_hold_remaining_s = NAN;
+			}
+
+			return true;
+		}
+
+		waypoint.hold_active = false;
+		waypoint.hold_start = 0;
+		_waypoint_hold_remaining_s = 0.f;
+
+		if (distance <= waypoint.acceptance_radius_m) {
+			if (waypoint.mode == kWaypointFlyThrough) {
+				++_waypoint_index;
+			}
+
+			return true;
+		}
+
+		const float speed = math::constrain(distance * _position_gain, 0.f, waypoint.cruise_speed_m_s);
+		const Vector3f direction = distance > 1e-3f ? error / distance : Vector3f{0.f, 0.f, 0.f};
+		_last_target = target_global;
+		_last_velocity_sp = direction * speed;
+		_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
+		return true;
 	}
 
 	static bool finite_position(const vehicle_local_position_s &position)
@@ -517,6 +634,7 @@ private:
 		_last_target = Vector3f{NAN, NAN, NAN};
 		_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
 		_current_yaw_sp = 0.f;
+		clear_waypoint_hold_states();
 	}
 
 	void update_phase(hrt_abstime now)
@@ -564,7 +682,7 @@ private:
 			Vector3f ascent_target{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
 			Vector3f lateral_target{};
 
-			if (hover_window_lateral_target(lateral_target)) {
+			if (ascent_uses_hover_window(lateral_target)) {
 				ascent_target(0) = lateral_target(0);
 				ascent_target(1) = lateral_target(1);
 				ascent_target(2) = -math::max(_takeoff_alt_m, _hold_altitude_m);
@@ -578,6 +696,10 @@ private:
 
 		if (_tv3_status.mode == tv3_status_s::MODE_COAST) {
 			_mission_started = true;
+
+			if (_apogee_mode == kApogeeSkip) {
+				_apogee_reached = true;
+			}
 
 			if (!_apogee_reached) {
 				if (!require_thrust_solution(tv3_guidance_status_s::PHASE_APOGEE_TRACK)) {
@@ -603,21 +725,14 @@ private:
 				}
 
 				_phase = tv3_guidance_status_s::PHASE_WAYPOINT_TRACK;
-				const MissionPoint &target = _mission_waypoints[_waypoint_index];
-				const Vector3f target_global = _origin + target.position;
-				const Vector3f error = target_global - position;
-				const float distance = error.norm();
+				update_active_waypoint(position, now);
+				return;
+			}
 
-				if (distance <= target.acceptance_radius_m) {
-					++_waypoint_index;
-					return;
-				}
-
-				const float speed = math::constrain(distance * _position_gain, 0.f, target.cruise_speed_m_s);
-				const Vector3f direction = distance > 1e-3f ? error / distance : Vector3f{0.f, 0.f, 0.f};
-
-				_last_target = target_global;
-				_last_velocity_sp = direction * speed;
+			if (_landing_mode == kLandingSkip) {
+				_phase = tv3_guidance_status_s::PHASE_COMPLETE;
+				_last_target = _origin + _landing_point;
+				_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
 				_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
 				return;
 			}
@@ -690,6 +805,11 @@ private:
 		status.tv3_mode = _tv3_status.mode;
 		status.waypoint_index = _waypoint_index;
 		status.waypoint_count = kMissionWaypointCount;
+		status.waypoint_mode = _current_waypoint_mode;
+		status.waypoint_hold_remaining_s = _waypoint_hold_remaining_s;
+		status.ascent_mode = _ascent_mode;
+		status.apogee_mode = _apogee_mode;
+		status.landing_mode = _landing_mode;
 		status.target_n = _last_target(0);
 		status.target_e = _last_target(1);
 		status.target_d = _last_target(2);
@@ -808,12 +928,13 @@ private:
 	float _splay_max_deg{5.f};
 	float _torque_pitch_max{10.f};
 	float _torque_yaw_max{10.f};
+	uint8_t _ascent_mode{kAscentLaunch};
+	uint8_t _apogee_mode{kApogeeTrack};
+	uint8_t _landing_mode{kLandingApproach};
+	uint8_t _current_waypoint_mode{kWaypointFlyThrough};
+	float _waypoint_hold_remaining_s{0.f};
 
-	MissionPoint _mission_waypoints[kMissionWaypointCount]{
-		{make_vector(60.f, 0.f, -60.f), 15.f, 25.f},
-		{make_vector(150.f, 30.f, -90.f), 15.f, 25.f},
-		{make_vector(220.f, 80.f, -75.f), 15.f, 25.f},
-	};
+	MissionPoint _mission_waypoints[kMissionWaypointCount]{};
 	Vector3f _landing_point{0.f, 0.f, 0.f};
 
 	uint8_t _phase{tv3_guidance_status_s::PHASE_STANDBY};

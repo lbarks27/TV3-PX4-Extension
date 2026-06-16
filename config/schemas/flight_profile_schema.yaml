@@ -60,6 +60,21 @@ guidance:
     - land_e_m
     - land_d_m
     - sim_groundtruth_fallback
+    - ascent_mode
+    - apogee_mode
+    - landing_mode
+    - wp1_mode
+    - wp2_mode
+    - wp3_mode
+    - wp1_hold_s
+    - wp2_hold_s
+    - wp3_hold_s
+    - wp1_acceptance_m
+    - wp2_acceptance_m
+    - wp3_acceptance_m
+    - wp1_cruise_m_s
+    - wp2_cruise_m_s
+    - wp3_cruise_m_s
 mission_profile:
   required:
     - required_sim_gates

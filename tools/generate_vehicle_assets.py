@@ -40,7 +40,40 @@ GUIDANCE_KEYS = {
     "sim_groundtruth_fallback",
     "tilt_gain",
     "tilt_max_deg",
+    "ascent_mode",
+    "apogee_mode",
+    "landing_mode",
+    "wp1_mode",
+    "wp2_mode",
+    "wp3_mode",
+    "wp1_hold_s",
+    "wp2_hold_s",
+    "wp3_hold_s",
+    "wp1_acceptance_m",
+    "wp2_acceptance_m",
+    "wp3_acceptance_m",
+    "wp1_cruise_m_s",
+    "wp2_cruise_m_s",
+    "wp3_cruise_m_s",
 }
+ASCENT_MODES = {"launch_ascent": 0, "hover_window": 1}
+APOGEE_MODES = {"track": 0, "skip": 1}
+LANDING_MODES = {"approach": 0, "skip": 1}
+WP_MODES = {"fly_through": 0, "position_hold": 1}
+
+
+def guidance_mode_value(mapping: dict[str, int], value, default: str) -> int:
+    if value is None:
+        return mapping[default]
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key not in mapping:
+            allowed = ", ".join(sorted(mapping))
+            raise ValueError(f"unknown guidance mode '{value}'; expected one of: {allowed}")
+        return mapping[key]
+    raise ValueError(f"guidance mode must be a string or integer, got {type(value).__name__}")
 LOGGER_TOPICS = [
     ("# Core PX4 state", None),
     ("vehicle_status", 100),
@@ -361,6 +394,21 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_GD_LAND_E", g("land_e_m", 0.0), 9)
     append_param(lines, "RK_GD_LAND_D", g("land_d_m", 0.0), 9)
     append_param(lines, "RK_GD_SIM_GT", g("sim_groundtruth_fallback", 0), 6)
+    append_param(lines, "RK_GD_ASCENT_MODE", guidance_mode_value(ASCENT_MODES, g("ascent_mode", None), "launch_ascent"), 6)
+    append_param(lines, "RK_GD_APOGEE_MODE", guidance_mode_value(APOGEE_MODES, g("apogee_mode", None), "track"), 6)
+    append_param(lines, "RK_GD_LAND_MODE", guidance_mode_value(LANDING_MODES, g("landing_mode", None), "approach"), 6)
+    append_param(lines, "RK_GD_WP1_MODE", guidance_mode_value(WP_MODES, g("wp1_mode", None), "fly_through"), 6)
+    append_param(lines, "RK_GD_WP2_MODE", guidance_mode_value(WP_MODES, g("wp2_mode", None), "fly_through"), 6)
+    append_param(lines, "RK_GD_WP3_MODE", guidance_mode_value(WP_MODES, g("wp3_mode", None), "fly_through"), 6)
+    append_param(lines, "RK_GD_WP1_HOLD_S", g("wp1_hold_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP2_HOLD_S", g("wp2_hold_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP3_HOLD_S", g("wp3_hold_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP1_ACC_M", g("wp1_acceptance_m", 0.0), 9)
+    append_param(lines, "RK_GD_WP2_ACC_M", g("wp2_acceptance_m", 0.0), 9)
+    append_param(lines, "RK_GD_WP3_ACC_M", g("wp3_acceptance_m", 0.0), 9)
+    append_param(lines, "RK_GD_WP1_CRUISE_MS", g("wp1_cruise_m_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP2_CRUISE_MS", g("wp2_cruise_m_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP3_CRUISE_MS", g("wp3_cruise_m_s", 0.0), 9)
     append_param(lines, "RK_ATT_TILT_GAIN", g("tilt_gain", 0.12), 9)
     append_param(lines, "RK_ATT_TILT_MAX", g("tilt_max_deg", 20.0), 9)
 

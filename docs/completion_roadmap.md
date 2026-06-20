@@ -1,31 +1,38 @@
 # TV3 Completion Roadmap
 
-This document describes the path from the current software stack to a flight-ready TV3 repo. "Completion" means the repo can repeatedly prove, from checked-in configuration and archived logs, that the selected vehicle can be simulated, bench-tested, flown, logged, and reviewed against its mission.
+This document is the **plan**: phases, goals, exit criteria, and gate scripts. It should change rarely.
+
+For **current progress**, gate results, manifest provenance counts, and evidence links, see the generated dashboard in [docs/completion_status.md](completion_status.md). Refresh it with:
+
+```bash
+./scripts/check_completion_status.sh
+./scripts/check_completion_status.sh --run-gates fast   # rerun fast gate scripts
+./scripts/check_completion_status.sh --run-gates all    # include slow SIH hover gate
+```
+
+Manual notes and status overrides live in [config/completion_status.json](../config/completion_status.json).
+
+"Completion" means the repo can repeatedly prove, from checked-in configuration and archived logs, that the selected vehicle can be simulated, bench-tested, flown, logged, and reviewed against its mission.
 
 For build and run instructions, see [docs/simulation.md](simulation.md).
 
-## Current State
+## Status Vocabulary
 
-- `tv3_v1` remains the default single-engine TVC ascent manifest.
-- `tv3_lander_v1` is the active three-engine lander validation manifest.
-- PX4 SIH plus the external `tv3_sih` module is now the active simulator path.
-- Hawkeye is visualization only and consumes the PX4 SIH MAVLink stream on UDP `19410`.
-- `tools/generate_vehicle_assets.py` generates runtime params, motor placeholders, and logger topics from a selected manifest.
-- The retired Gazebo workflow is archived under `deprecated/sim/gazebo/`; large generated payloads and old run logs are archived under `../deprecated-sim/gazebo/`.
-- `tv3_motor_model`, `tv3_load_cell`, `tv3_mode_manager`, `tv3_att_control`, `tv3_guidance`, and the allocator plumbing remain the active flight-software path.
+| Status | Meaning |
+| --- | --- |
+| `not_started` | No meaningful work or tooling yet |
+| `in_progress` | Partial progress; exit criteria not fully met |
+| `structural` | Repo tooling/tests in place; not mission- or hardware-proven |
+| `verified` | Exit script passes and evidence artifacts exist |
+| `blocked` | Known external blocker (set via `status_override` in the status JSON) |
 
-Important limits remain:
-
-- Physical manifests still contain preliminary mass, CG, inertia, engine geometry, and actuator values.
-- `tv3_sih` is deterministic first-pass 6DoF physics, not a final correlated vehicle model.
-- Guidance and allocation are observable but not yet proven across the full launch-to-landing envelope.
-- Hardware ignition, load-cell calibration, and restrained/tethered validation are still flight blockers.
+Phase 2 field-level progress is derived from `data_status.fields` in each vehicle manifest (`measured`, `preliminary`, `placeholder`). Do not duplicate those counts here.
 
 ## Source Of Truth
 
-- Vehicle manifests: `config/vehicles/*.yaml`
-- Flight profiles and scenario targets: `config/flight_profiles/*.yaml`
-- Intake schema: `config/schemas/vehicle_intake_schema.yaml`
+- Vehicle manifests: `config/vehicles/*.json`
+- Flight profiles and scenario targets: `config/flight_profiles/*.json`
+- Intake schema: `config/schemas/vehicle_intake_schema.json`
 - Runtime params and SD-card payloads: generated output under `build/`
 - PX4 external modules and messages: `src/` and `msg/`
 - Test evidence: host test output, SIH logs, ULog files, bench calibration reports, and flight-review notes
@@ -39,7 +46,7 @@ Goal: make the active simulator boring to build and easy to reproduce.
 Work:
 
 - Keep `tv3_v1` as the default manifest and `guidance.enable: 0`.
-- Use `tv3_lander_v1` plus `lander_hover_window.yaml` as the first required SIH gate.
+- Use `tv3_lander_v1` plus `lander_hover_window.json` as the first required SIH gate.
 - Keep `RK_LC_SRC=1` for SIH so load-cell confirmation follows reference thrust.
 - Keep generated outputs disposable under `build/`.
 - Keep old visual-simulator material in `deprecated/` only.
@@ -58,8 +65,8 @@ Goal: validate the first required lander scenario in SIH before expanding scope.
 Required profile:
 
 ```text
-TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml
-TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml
+TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json
+TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json
 ```
 
 Pass criteria:
@@ -88,18 +95,17 @@ Work:
 - Fill load-cell channel maps, tare, scale, noise, and timeout data.
 - Promote `data_status.fields` entries from `preliminary` or `placeholder` to `measured` as bench evidence arrives.
 
-Infrastructure now in repo (no measured numbers required):
-
-- Machine-readable intake schema: `config/schemas/vehicle_intake_schema.yaml`
-- Manifest validator with unit checks and PX4 param parity: `tools/validate_vehicle_manifest.py`
-- Both manifests declare `data_status.flight_ready: false` and per-field provenance
-- Generator rejects manifests that fail intake validation
-
-Exit script (structural gate; passes before measured data exists):
+Exit scripts:
 
 ```bash
-./scripts/check_physical_manifests.sh
+./scripts/check_physical_manifests.sh          # schema + generator gate
+./scripts/stage_microsd.sh                     # deploy runtime payload to SD card
+./scripts/complete_phase2_bench.sh             # MAVLink capture into manifest
 ```
+
+Hardware bench order: flash TV3 firmware → stage microSD → calibrate load cell →
+run `complete_phase2_bench.sh` with QGC closed. See
+[docs/hardware_flight_workflow.md](hardware_flight_workflow.md).
 
 Exit criteria:
 
@@ -132,6 +138,9 @@ Exit criteria:
 
 ## Phase 4: Control Mixer
 
+See [control_mixer.md](control_mixer.md) for the attitude mixer, PX4 allocator, triple-engine
+TVC geometry, splay throttle, and reachability model.
+
 Goal: requested torque and net thrust become reachable, bounded engine commands.
 
 Work:
@@ -150,13 +159,6 @@ Exit criteria:
 
 - Flight mixer and host allocator agree on representative cases.
 - Hover and landing guidance can query reachability before committing to a solution.
-
-Infrastructure now in repo (structural gate; full envelope proof still needs measured actuator data):
-
-- Shared constrained solver: `tools/tv3_control_allocator.py`
-- CLI reachability check: `tools/tv3_allocator.py`
-- Scenario coverage: nominal, saturated, failed-engine, low/high thrust, burnout, and guidance reachability tests
-- Guidance publishes `control_solution_valid` and `control_unreachable_reason` in `tv3_guidance_status`
 
 ## Phase 5: Guidance And Monte Carlo
 
@@ -177,13 +179,6 @@ Exit criteria:
 
 - `tv3_lander_v1` can complete launch, waypoint, hover/descend, and landing scenarios in SIH with logged margins.
 - Guidance reports no-solution for impossible profiles.
-
-Infrastructure now in repo (structural gate; full SIH mission proof still required):
-
-- Shared guidance envelope model: `tools/tv3_guidance_envelope.py`
-- Lightweight Monte Carlo runner: `tools/run_guidance_monte_carlo.py`
-- Impossible-profile fixture: `config/flight_profiles/lander_impossible_guidance.yaml`
-- Guidance publishes impulse, landing-reserve, and abort-corridor margins in `tv3_guidance_status`
 
 ## Phase 6: Bench And Hardware Gates
 

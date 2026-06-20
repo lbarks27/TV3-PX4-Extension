@@ -1,0 +1,133 @@
+{
+  "schema": "tv3_completion_status_v1",
+  "updated_utc": "2026-06-20T02:08:48+00:00",
+  "phases": {
+    "0": {
+      "title": "Stabilize SIH Baseline",
+      "gate_script": "scripts/check_barebones.sh",
+      "gate_profile": "fast",
+      "status": "verified",
+      "status_override": null,
+      "notes": "",
+      "evidence": [
+        "logs/sim/2026-06-15/phase1-gate-final-20260615T222105Z",
+        "logs/sim/2026-06-19/doc-verify-sih-headless",
+        "logs/sim/2026-06-20/assessment-20260620T020532Z"
+      ],
+      "last_gate_run_utc": "2026-06-19T15:58:41+00:00",
+      "last_gate_result": "pass",
+      "last_gate_output_tail": "test_guidance_mode_value_mapping (test_vehicle_assets.VehicleAssetTests.test_guidance_mode_value_mapping) ... ok\ntest_sitl_airframes_share_common_defaults (test_vehicle_assets.VehicleAssetTests.test_sitl_airframes_share_common_defaults) ... ok\ntest_vehicle_intake_schema_exists (test_vehicle_assets.VehicleAssetTests.test_vehicle_intake_schema_exists) ... ok\ntest_both_vehicle_manifests_validate (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_both_vehicle_manifests_validate) ... ok\ntest_generator_rejects_invalid_manifest (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_generator_rejects_invalid_manifest) ... ok\ntest_manifests_are_not_flight_ready (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_manifests_are_not_flight_ready) ... ok\ntest_param_parity_checks_pass (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_param_parity_checks_pass) ... ok\ntest_placeholder_fields_are_tracked (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_placeholder_fields_are_tracked) ... ok\ntest_unit_vector_validation_rejects_bad_axis (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_unit_vector_validation_rejects_bad_axis) ... ok\n----------------------------------------------------------------------\nRan 67 tests in 0.699s\nOK"
+    },
+    "1": {
+      "title": "Prove Lander Hover Window",
+      "gate_script": "scripts/check_hover_window.sh",
+      "gate_profile": "slow",
+      "status": "in_progress",
+      "status_override": null,
+      "notes": "",
+      "evidence": [
+        "logs/sim/2026-06-15/phase1-gate-final-20260615T222105Z",
+        "logs/sim/2026-06-15/phase1-gate-final-20260615T221439Z",
+        "logs/sim/2026-06-15/phase1-gate-final-20260615T220515Z",
+        "logs/sim/2026-06-19/doc-verify-sih-headless",
+        "logs/sim/2026-06-20/assessment-20260620T020532Z"
+      ],
+      "last_gate_run_utc": null,
+      "last_gate_result": "unknown",
+      "last_gate_output_tail": ""
+    },
+    "2": {
+      "title": "Replace Provisional Physical Data",
+      "gate_script": "scripts/check_physical_manifests.sh",
+      "gate_profile": "fast",
+      "status": "in_progress",
+      "status_override": null,
+      "notes": "",
+      "evidence": [
+        "logs/ground/bench_capture_2026-06-18T23-37-19.335534+00-00.json",
+        "logs/ground/bench_capture_2026-06-18T23-06-54.330135+00-00.json",
+        "logs/ground/bench_capture_2026-06-18T22-21-38.491083+00-00.json",
+        "config/vehicles/tv3_v1.json"
+      ],
+      "last_gate_run_utc": "2026-06-19T15:58:41+00:00",
+      "last_gate_result": "pass",
+      "last_gate_output_tail": "test_guidance_mode_value_mapping (test_vehicle_assets.VehicleAssetTests.test_guidance_mode_value_mapping) ... ok\ntest_sitl_airframes_share_common_defaults (test_vehicle_assets.VehicleAssetTests.test_sitl_airframes_share_common_defaults) ... ok\ntest_vehicle_intake_schema_exists (test_vehicle_assets.VehicleAssetTests.test_vehicle_intake_schema_exists) ... ok\ntest_both_vehicle_manifests_validate (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_both_vehicle_manifests_validate) ... ok\ntest_generator_rejects_invalid_manifest (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_generator_rejects_invalid_manifest) ... ok\ntest_manifests_are_not_flight_ready (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_manifests_are_not_flight_ready) ... ok\ntest_param_parity_checks_pass (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_param_parity_checks_pass) ... ok\ntest_placeholder_fields_are_tracked (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_placeholder_fields_are_tracked) ... ok\ntest_unit_vector_validation_rejects_bad_axis (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_unit_vector_validation_rejects_bad_axis) ... ok\n----------------------------------------------------------------------\nRan 67 tests in 0.692s\nOK"
+    },
+    "3": {
+      "title": "Propulsion And Load-Cell Semantics",
+      "gate_script": "scripts/check_propulsion_semantics.sh",
+      "gate_profile": "fast",
+      "status": "structural",
+      "status_override": null,
+      "notes": "",
+      "evidence": [],
+      "last_gate_run_utc": "2026-06-19T15:58:41+00:00",
+      "last_gate_result": "pass",
+      "last_gate_output_tail": "test_guidance_mode_value_mapping (test_vehicle_assets.VehicleAssetTests.test_guidance_mode_value_mapping) ... ok\ntest_sitl_airframes_share_common_defaults (test_vehicle_assets.VehicleAssetTests.test_sitl_airframes_share_common_defaults) ... ok\ntest_vehicle_intake_schema_exists (test_vehicle_assets.VehicleAssetTests.test_vehicle_intake_schema_exists) ... ok\ntest_both_vehicle_manifests_validate (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_both_vehicle_manifests_validate) ... ok\ntest_generator_rejects_invalid_manifest (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_generator_rejects_invalid_manifest) ... ok\ntest_manifests_are_not_flight_ready (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_manifests_are_not_flight_ready) ... ok\ntest_param_parity_checks_pass (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_param_parity_checks_pass) ... ok\ntest_placeholder_fields_are_tracked (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_placeholder_fields_are_tracked) ... ok\ntest_unit_vector_validation_rejects_bad_axis (test_vehicle_manifest_validation.VehicleManifestValidationTests.test_unit_vector_validation_rejects_bad_axis) ... ok\n----------------------------------------------------------------------\nRan 67 tests in 0.655s\nOK"
+    },
+    "4": {
+      "title": "Control Mixer",
+      "gate_script": "scripts/check_control_mixer.sh",
+      "gate_profile": "fast",
+      "status": "structural",
+      "status_override": null,
+      "notes": "",
+      "evidence": [],
+      "last_gate_run_utc": "2026-06-19T15:58:41+00:00",
+      "last_gate_result": "pass",
+      "last_gate_output_tail": "test_flight_and_plant_models_agree_at_small_deflection (tests.test_control_allocator.ControlAllocatorTests.test_flight_and_plant_models_agree_at_small_deflection) ... ok\ntest_guidance_hover_reachability_uses_active_thrust (tests.test_control_allocator.ControlAllocatorTests.test_guidance_hover_reachability_uses_active_thrust) ... ok\ntest_guidance_rejects_lateral_demand_beyond_torque_limits (tests.test_control_allocator.ControlAllocatorTests.test_guidance_rejects_lateral_demand_beyond_torque_limits) ... ok\ntest_high_thrust_above_full_envelope_is_unreachable (tests.test_control_allocator.ControlAllocatorTests.test_high_thrust_above_full_envelope_is_unreachable) ... ok\ntest_low_thrust_outside_splay_envelope_is_unreachable (tests.test_control_allocator.ControlAllocatorTests.test_low_thrust_outside_splay_envelope_is_unreachable) ... ok\ntest_nominal_hover_is_reachable (tests.test_control_allocator.ControlAllocatorTests.test_nominal_hover_is_reachable) ... ok\ntest_saturated_torque_demand_is_unreachable (tests.test_control_allocator.ControlAllocatorTests.test_saturated_torque_demand_is_unreachable) ... ok\ntest_single_engine_ascent_nominal_torque (tests.test_control_allocator.ControlAllocatorTests.test_single_engine_ascent_nominal_torque) ... ok\ntest_unreachable_results_include_residuals (tests.test_control_allocator.ControlAllocatorTests.test_unreachable_results_include_residuals) ... ok\n----------------------------------------------------------------------\nRan 12 tests in 0.282s\nOK"
+    },
+    "5": {
+      "title": "Guidance And Monte Carlo",
+      "gate_script": "scripts/check_guidance_monte_carlo.sh",
+      "gate_profile": "fast",
+      "status": "structural",
+      "status_override": null,
+      "notes": "",
+      "evidence": [],
+      "last_gate_run_utc": "2026-06-19T15:58:41+00:00",
+      "last_gate_result": "pass",
+      "last_gate_output_tail": "Phase 5 guidance-and-monte-carlo gate passed\ntest_abort_corridor_rejects_far_offset_with_low_delta_v (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_abort_corridor_rejects_far_offset_with_low_delta_v) ... ok\ntest_excessive_lateral_command_rejects_control_envelope (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_excessive_lateral_command_rejects_control_envelope) ... ok\ntest_hover_profile_has_valid_envelope (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_hover_profile_has_valid_envelope) ... ok\ntest_impossible_profile_rejects_impulse_reserve (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_impossible_profile_rejects_impulse_reserve) ... ok\ntest_impossible_profile_rejects_solution (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_impossible_profile_rejects_solution) ... ok\ntest_landing_reserve_rejects_high_altitude_with_low_delta_v (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_landing_reserve_rejects_high_altitude_with_low_delta_v) ... ok\ntest_monte_carlo_reports_mixed_valid_and_invalid_samples (tests.test_guidance_envelope.GuidanceEnvelopeTests.test_monte_carlo_reports_mixed_valid_and_invalid_samples) ... ok\n----------------------------------------------------------------------\nRan 7 tests in 0.241s\nOK"
+    },
+    "6": {
+      "title": "Bench And Hardware Gates",
+      "gate_script": null,
+      "gate_profile": "manual",
+      "status": "in_progress",
+      "status_override": null,
+      "notes": "tv3_v1 Cube Orange Plus wiring and load-cell path verified on bench; calibration promotion, restrained ignition, and TVC endpoint measurement still open.",
+      "evidence": [
+        "logs/ground/bench_capture_2026-06-18T23-37-19.335534+00-00.json"
+      ],
+      "last_gate_run_utc": null,
+      "last_gate_result": "unknown",
+      "last_gate_output_tail": ""
+    }
+  },
+  "flight_gates": {
+    "A": {
+      "title": "tv3_v1 single-engine ascent free flight",
+      "vehicle": "tv3_v1",
+      "status": "not_started",
+      "status_override": null,
+      "notes": "",
+      "evidence": []
+    },
+    "B": {
+      "title": "tv3_lander_v1 restrained/tethered lander tests",
+      "vehicle": "tv3_lander_v1",
+      "status": "not_started",
+      "status_override": null,
+      "notes": "",
+      "evidence": []
+    },
+    "C": {
+      "title": "tv3_lander_v1 waypoint and landing flight",
+      "vehicle": "tv3_lander_v1",
+      "status": "not_started",
+      "status_override": null,
+      "notes": "",
+      "evidence": []
+    }
+  }
+}

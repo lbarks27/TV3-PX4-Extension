@@ -1,0 +1,54 @@
+{
+  "schema": "tv3_flight_profile_v1",
+  "name": "lander_impossible_guidance",
+  "description": "Deliberately unreachable lander guidance profile for no-solution host gates.",
+  "vehicle": "tv3_lander_v1",
+  "scenario": {
+    "type": "guidance_no_solution",
+    "simulator": "sih",
+    "intent": "Prove guidance rejects impossible thrust, impulse, and landing-reserve demands before committing.",
+    "simulated_only": true
+  },
+  "guidance": {
+    "enable": 1,
+    "takeoff_alt_m": 8.0,
+    "apex_alt_m": 18.0,
+    "pos_p": 0.18,
+    "vel_max_m_s": 7.0,
+    "vel_up_m_s": 4.5,
+    "vel_dn_m_s": 3.0,
+    "yaw_deg": 0.0,
+    "hold_alt_m": 8.0,
+    "acceptance_m": 3.0,
+    "min_twr": 4.5,
+    "landing_twr": 5.0,
+    "min_remaining_impulse_ns": 5000000.0,
+    "wp1_n_m": 0.0,
+    "wp1_e_m": 0.0,
+    "wp1_d_m": -8.0,
+    "wp2_n_m": 0.0,
+    "wp2_e_m": 0.0,
+    "wp2_d_m": -10.0,
+    "wp3_n_m": 0.0,
+    "wp3_e_m": 0.0,
+    "wp3_d_m": -8.0,
+    "land_n_m": 0.0,
+    "land_e_m": 0.0,
+    "land_d_m": 0.0,
+    "sim_groundtruth_fallback": 1
+  },
+  "mission_profile": {
+    "first_free_flight_gate": "single_engine_ascent",
+    "required_sim_gates": [
+      "unreachable_guidance_no_solution"
+    ]
+  },
+  "review": {
+    "required_topics": [
+      "tv3_guidance_status"
+    ],
+    "success_criteria": [
+      "guidance reports no solution for impossible thrust and impulse demands"
+    ]
+  }
+}

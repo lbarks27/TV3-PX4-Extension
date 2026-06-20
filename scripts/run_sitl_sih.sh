@@ -6,8 +6,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 TV3_ROOT=$(cd -- "${REPO_ROOT}/.." && pwd)
 
-export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.yaml}"
-export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.yaml}"
+export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.json}"
+export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.json}"
 export PX4_SIMULATOR="${PX4_SIMULATOR:-sihsim}"
 export PX4_SIM_MODEL="${PX4_SIM_MODEL:-tv3_lander}"
 export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-11002}"
@@ -34,27 +34,27 @@ touch "${MARKER}"
 
 profile_name=$(python3 - "${REPO_ROOT}" "${TV3_FLIGHT_PROFILE}" <<'PY'
 from pathlib import Path
+import json
 import sys
-import yaml
 
 repo = Path(sys.argv[1])
 profile = Path(sys.argv[2])
 if not profile.is_absolute():
     profile = repo / profile
-data = yaml.safe_load(profile.read_text())
+data = json.loads(profile.read_text())
 print(data.get("name", profile.stem))
 PY
 )
 vehicle_name=$(python3 - "${REPO_ROOT}" "${TV3_VEHICLE_CONFIG}" <<'PY'
 from pathlib import Path
+import json
 import sys
-import yaml
 
 repo = Path(sys.argv[1])
 vehicle = Path(sys.argv[2])
 if not vehicle.is_absolute():
     vehicle = repo / vehicle
-data = yaml.safe_load(vehicle.read_text())
+data = json.loads(vehicle.read_text())
 print(data.get("name", vehicle.stem))
 PY
 )

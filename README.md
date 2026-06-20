@@ -12,8 +12,10 @@ Flight profiles in `config/flight_profiles/` define scenario targets that can be
 
 - **[Simulation Guide](docs/simulation.md)** — macOS prerequisites, first-time setup, recommended daily workflow, QGroundControl connection, ports, and troubleshooting.
 - **[Hardware Flight Workflow](docs/hardware_flight_workflow.md)** — Cube Orange Plus upload, microSD runtime staging, QGC setup, parameter checks, and launch-day software flow.
-- **[Completion Roadmap](docs/completion_roadmap.md)** — current state, detailed phase plan, flight gates, and immediate next work for both vehicles.
+- **[Completion Roadmap](docs/completion_roadmap.md)** — phase plan, exit criteria, and gate scripts.
+- **[Completion Status](docs/completion_status.md)** — generated progress dashboard (refresh with `./scripts/check_completion_status.sh`).
 - **[Implementation Phases](docs/implementation_phases.md)** — high-level product intent (see roadmap for the active plan).
+- **[Control Mixer](docs/control_mixer.md)** — attitude mixer, PX4 allocator, triple-engine TVC geometry, splay throttle, and reachability checks.
 
 ## Quick Start
 
@@ -27,10 +29,18 @@ Flight profiles in `config/flight_profiles/` define scenario targets that can be
 ./scripts/run_sitl_sih.sh
 ```
 
-Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml`.
-Load a flight scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml`.
+Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json`.
+Load a flight scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json`.
 
-See [docs/simulation.md](docs/simulation.md) for the full reproducible workflow, QGC/Hawkeye ports, and scenario command runner behavior.
+Hardware bench (Cube Orange Plus + microSD):
+
+```bash
+./scripts/build_nuttx.sh cubepilot_cubeorangeplus_default   # build + flash TV3 firmware
+./scripts/stage_microsd.sh                                 # SD card attached to this Mac
+./scripts/complete_phase2_bench.sh --body-mass-kg <kg>      # QGC closed; captures into manifest
+```
+
+See [docs/simulation.md](docs/simulation.md) for prerequisites, the full SIH workflow, QGC/Hawkeye ports, profile command runner behavior, and troubleshooting.
 
 ## Status & Roadmap
 

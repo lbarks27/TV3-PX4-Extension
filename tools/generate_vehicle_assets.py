@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 from copy import deepcopy
 from pathlib import Path
-
-import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +54,9 @@ GUIDANCE_KEYS = {
     "wp1_cruise_m_s",
     "wp2_cruise_m_s",
     "wp3_cruise_m_s",
+    "roll_prog_deg",
+    "roll_prog_start_s",
+    "roll_prog_dur_s",
 }
 ASCENT_MODES = {"launch_ascent": 0, "hover_window": 1}
 APOGEE_MODES = {"track": 0, "skip": 1}
@@ -101,20 +103,23 @@ LOGGER_TOPICS = [
     ("tv3_mode_status", 20),
     ("tv3_motor_reference", 20),
     ("tv3_status", 20),
-    ("tv3_thrust", 20),
+    ("tv3_thrust", 50),
 ]
 
 
 def load_vehicle(path: Path) -> dict:
     with path.open() as stream:
-        return yaml.safe_load(stream)
+        vehicle = json.load(stream)
+    if not isinstance(vehicle, dict):
+        raise ValueError(f"vehicle config must be a JSON object: {path}")
+    return vehicle
 
 
 def load_flight_profile(path: Path) -> dict:
     with path.open() as stream:
-        profile = yaml.safe_load(stream)
+        profile = json.load(stream)
     if not isinstance(profile, dict):
-        raise ValueError(f"flight profile must be a YAML mapping: {path}")
+        raise ValueError(f"flight profile must be a JSON object: {path}")
     return profile
 
 
@@ -187,15 +192,15 @@ def vehicle_engines(vehicle: dict) -> list[dict]:
             "load_cell_channel": vehicle["hardware"]["load_cell"]["adc_channel"],
             "position_m": [body["motor_com_x_m"], 0.0, 0.0],
             "thrust_axis": [1.0, 0.0, 0.0],
-            "pitch_axis": [0.0, -1.0, 0.0],
+            "roll_axis": [0.0, -1.0, 0.0],
             "yaw_axis": [0.0, 0.0, -1.0],
             "thrust_fraction": 1.0,
             "gimbal": {
-                "pitch_max_deg": body["tvc_max_deg"],
+                "roll_max_deg": body["tvc_max_deg"],
                 "yaw_max_deg": body["tvc_max_deg"],
                 "splay_max_deg": body["tvc_max_deg"],
                 "slew_dps": body["tvc_slew_dps"],
-                "pitch_trim": 0.0,
+                "roll_trim": 0.0,
                 "yaw_trim": 0.0,
             },
         }
@@ -206,6 +211,26 @@ def ignition_sequence(vehicle: dict, engines: list[dict]) -> list[int]:
     ignition = vehicle.get("propulsion", {}).get("ignition", {})
     sequence = ignition.get("sequence", list(range(len(engines))))
     return [int(value) for value in sequence]
+
+
+def catalog_motor_index(vehicle: dict, engine: dict | None = None) -> int:
+    """Map an engine's motor_id to the firmware motor-catalog index (RK_ENGx_MOT)."""
+    from tools.tv3_motor_catalog import load_motor_catalog, resolve_motor_id
+
+    motor_selection = vehicle.get("motor_selection", {})
+    engines = vehicle_engines(vehicle)
+    target_engine = engine if engine is not None else (engines[0] if engines else {})
+
+    catalog_source = motor_selection.get("catalog_source")
+    if catalog_source:
+        catalog = load_motor_catalog(str(catalog_source))
+        motor_id = resolve_motor_id(target_engine, motor_selection)
+        if motor_id in catalog:
+            return catalog[motor_id].motor_index
+
+    if engine is not None:
+        return int(engine.get("motor_index", motor_selection.get("index", 0)))
+    return int(motor_selection.get("index", 0))
 
 
 def _validator_module():
@@ -225,7 +250,7 @@ def _validator_module():
 def validate_vehicle(vehicle: dict, vehicle_path: Path | None = None) -> None:
     validator = _validator_module()
     manifest_path = vehicle_path or Path("<in-memory>")
-    schema = validator.load_yaml(validator.DEFAULT_SCHEMA)
+    schema = validator.load_json(validator.DEFAULT_SCHEMA)
     report = validator.validate_manifest(vehicle, manifest_path, schema)
     if report.passed:
         return
@@ -234,11 +259,26 @@ def validate_vehicle(vehicle: dict, vehicle_path: Path | None = None) -> None:
     raise ValueError("vehicle manifest failed intake validation:\n  - " + "\n  - ".join(failures))
 
 
+def allocator_thrust_fields(vehicle: dict) -> dict[str, float]:
+    from tools.tv3_motor_catalog import allocator_thrust_fields_from_catalog
+
+    body = vehicle["vehicle"]
+    catalog_fields = allocator_thrust_fields_from_catalog(vehicle)
+    if catalog_fields is not None:
+        return catalog_fields
+    return {
+        "ca_reference_thrust_n": float(body["ca_reference_thrust_n"]),
+        "ca_minimum_thrust_n": float(body["ca_minimum_thrust_n"]),
+        "ca_fallback_thrust_n": float(body["ca_fallback_thrust_n"]),
+    }
+
+
 def write_px4_params(vehicle: dict, path: Path) -> None:
     controller = vehicle["controller"]
     state_machine = vehicle["state_machine"]
     hardware = vehicle["hardware"]
     body = vehicle["vehicle"]
+    allocator_thrust = allocator_thrust_fields(vehicle)
     motor = vehicle["motor_selection"]
     load_cell = hardware["load_cell"]
     guidance = vehicle.get("guidance", {})
@@ -254,9 +294,9 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     lines: list[str] = []
     append_param(lines, "CA_AIRFRAME", 16, 6)
     append_param(lines, "CA_RK_GRP_CNT", len(engines), 6)
-    append_param(lines, "CA_RK_REF_THR", body["ca_reference_thrust_n"], 9)
-    append_param(lines, "CA_RK_MIN_THR", body["ca_minimum_thrust_n"], 9)
-    append_param(lines, "CA_RK_FAL_THR", body["ca_fallback_thrust_n"], 9)
+    append_param(lines, "CA_RK_REF_THR", allocator_thrust["ca_reference_thrust_n"], 9)
+    append_param(lines, "CA_RK_MIN_THR", allocator_thrust["ca_minimum_thrust_n"], 9)
+    append_param(lines, "CA_RK_FAL_THR", allocator_thrust["ca_fallback_thrust_n"], 9)
     append_param(lines, "CA_RK_BODY_M", body["body_mass_kg"], 9)
     append_param(lines, "CA_RK_BODY_CMX", body["body_com_x_m"], 9)
     append_param(lines, "CA_RK_MOT_WET", body["motor_loaded_mass_kg"], 9)
@@ -267,7 +307,7 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
         gimbal = engine["gimbal"]
         position = engine["position_m"]
         axis = engine["thrust_axis"]
-        pitch_axis = engine["pitch_axis"]
+        roll_axis = engine.get("roll_axis", engine.get("pitch_axis", [0.0, -1.0, 0.0]))
         yaw_axis = engine["yaw_axis"]
         append_param(lines, f"CA_RK_G{index}_PX", position[0], 9)
         append_param(lines, f"CA_RK_G{index}_PY", position[1], 9)
@@ -275,29 +315,37 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
         append_param(lines, f"CA_RK_G{index}_AX", axis[0], 9)
         append_param(lines, f"CA_RK_G{index}_AY", axis[1], 9)
         append_param(lines, f"CA_RK_G{index}_AZ", axis[2], 9)
-        append_param(lines, f"CA_RK_G{index}_PAX", pitch_axis[0], 9)
-        append_param(lines, f"CA_RK_G{index}_PAY", pitch_axis[1], 9)
-        append_param(lines, f"CA_RK_G{index}_PAZ", pitch_axis[2], 9)
+        # Firmware params retain the legacy PAX/PMAX/PTR names for the primary (+/-90 deg) gimbal DOF.
+        append_param(lines, f"CA_RK_G{index}_PAX", roll_axis[0], 9)
+        append_param(lines, f"CA_RK_G{index}_PAY", roll_axis[1], 9)
+        append_param(lines, f"CA_RK_G{index}_PAZ", roll_axis[2], 9)
         append_param(lines, f"CA_RK_G{index}_YAX", yaw_axis[0], 9)
         append_param(lines, f"CA_RK_G{index}_YAY", yaw_axis[1], 9)
         append_param(lines, f"CA_RK_G{index}_YAZ", yaw_axis[2], 9)
-        append_param(lines, f"CA_RK_G{index}_PMAX", gimbal.get("pitch_max_deg", body["tvc_max_deg"]), 9)
+        append_param(
+            lines,
+            f"CA_RK_G{index}_PMAX",
+            gimbal.get("roll_max_deg", gimbal.get("pitch_max_deg", body["tvc_max_deg"])),
+            9,
+        )
         append_param(lines, f"CA_RK_G{index}_YMAX", gimbal.get("yaw_max_deg", body["tvc_max_deg"]), 9)
         append_param(lines, f"CA_RK_G{index}_TF", engine.get("thrust_fraction", 1.0 / len(engines)), 9)
-        append_param(lines, f"CA_RK_G{index}_PTR", gimbal.get("pitch_trim", 0.0), 9)
+        append_param(lines, f"CA_RK_G{index}_PTR", gimbal.get("roll_trim", gimbal.get("pitch_trim", 0.0)), 9)
         append_param(lines, f"CA_RK_G{index}_YTR", gimbal.get("yaw_trim", 0.0), 9)
 
     append_param(lines, "RK_ENABLE", 1, 6)
     append_param(lines, "RK_CMD_SRC", state_machine.get("command_source", 1), 6)
-    append_param(lines, "RK_MOT_IDX", motor["index"], 6)
+    append_param(lines, "RK_MOT_IDX", catalog_motor_index(vehicle, engines[0] if engines else None), 6)
     append_param(lines, "RK_ENG_COUNT", len(engines), 6)
     append_param(lines, "RK_IGN_DWELL_MS", ignition.get("dwell_ms", 0), 6)
     append_param(lines, "RK_SPLAY_MAX_DEG", throttle.get("max_splay_deg", body["tvc_max_deg"]), 9)
+    default_catalog_index = catalog_motor_index(vehicle)
     for index in range(MAX_ENGINES):
         engine = engines[index] if index < len(engines) else None
         sequence_value = sequence[index] if index < len(sequence) else index
         append_param(lines, f"RK_IGN_IDX{index}", sequence_value, 6)
-        append_param(lines, f"RK_ENG{index}_MOT", engine.get("motor_index", motor["index"]) if engine else motor["index"], 6)
+        motor_catalog_index = catalog_motor_index(vehicle, engine) if engine else default_catalog_index
+        append_param(lines, f"RK_ENG{index}_MOT", motor_catalog_index, 6)
 
     append_param(lines, "RK_LAUNCH_THR_N", state_machine["launch_threshold_n"], 9)
     append_param(lines, "RK_IGNITION_MS", state_machine["ignition_pulse_ms"], 6)
@@ -364,9 +412,9 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_LC_TARE", load_cell["calibration"]["tare"], 9)
     append_param(lines, "RK_LC_SCALE", load_cell["calibration"]["scale"], 9)
     append_param(lines, "RK_LC_KG_SC", load_cell["calibration"].get("kg_per_count", 0.0), 9)
-    append_param(lines, "RK_LC_ALPHA", load_cell.get("alpha", 0.25), 9)
-    append_param(lines, "RK_LC_DB", load_cell.get("deadband_counts", 0.0), 9)
-    append_param(lines, "RK_LC_TO_MS", load_cell.get("timeout_ms", 200), 6)
+    append_param(lines, "RK_LC_ALPHA", load_cell.get("alpha", 0.45), 9)
+    append_param(lines, "RK_LC_DB", load_cell.get("deadband_counts", 2.0), 9)
+    append_param(lines, "RK_LC_TO_MS", load_cell.get("timeout_ms", 100), 6)
     append_param(lines, "RK_LC_RATE_HZ", load_cell.get("publish_rate_hz", 10), 6)
     append_param(lines, "RK_GD_ENABLE", g("enable", 0), 6)
     append_param(lines, "RK_GD_TAKE_ALT", g("takeoff_alt_m", 35.0), 9)
@@ -394,8 +442,8 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_GD_LAND_E", g("land_e_m", 0.0), 9)
     append_param(lines, "RK_GD_LAND_D", g("land_d_m", 0.0), 9)
     append_param(lines, "RK_GD_SIM_GT", g("sim_groundtruth_fallback", 0), 6)
-    append_param(lines, "RK_GD_ASCENT_MODE", guidance_mode_value(ASCENT_MODES, g("ascent_mode", None), "launch_ascent"), 6)
-    append_param(lines, "RK_GD_APOGEE_MODE", guidance_mode_value(APOGEE_MODES, g("apogee_mode", None), "track"), 6)
+    append_param(lines, "RK_GD_ASC_MODE", guidance_mode_value(ASCENT_MODES, g("ascent_mode", None), "launch_ascent"), 6)
+    append_param(lines, "RK_GD_APX_MODE", guidance_mode_value(APOGEE_MODES, g("apogee_mode", None), "track"), 6)
     append_param(lines, "RK_GD_LAND_MODE", guidance_mode_value(LANDING_MODES, g("landing_mode", None), "approach"), 6)
     append_param(lines, "RK_GD_WP1_MODE", guidance_mode_value(WP_MODES, g("wp1_mode", None), "fly_through"), 6)
     append_param(lines, "RK_GD_WP2_MODE", guidance_mode_value(WP_MODES, g("wp2_mode", None), "fly_through"), 6)
@@ -406,14 +454,33 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_GD_WP1_ACC_M", g("wp1_acceptance_m", 0.0), 9)
     append_param(lines, "RK_GD_WP2_ACC_M", g("wp2_acceptance_m", 0.0), 9)
     append_param(lines, "RK_GD_WP3_ACC_M", g("wp3_acceptance_m", 0.0), 9)
-    append_param(lines, "RK_GD_WP1_CRUISE_MS", g("wp1_cruise_m_s", 0.0), 9)
-    append_param(lines, "RK_GD_WP2_CRUISE_MS", g("wp2_cruise_m_s", 0.0), 9)
-    append_param(lines, "RK_GD_WP3_CRUISE_MS", g("wp3_cruise_m_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP1_C_MS", g("wp1_cruise_m_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP2_C_MS", g("wp2_cruise_m_s", 0.0), 9)
+    append_param(lines, "RK_GD_WP3_C_MS", g("wp3_cruise_m_s", 0.0), 9)
     append_param(lines, "RK_ATT_TILT_GAIN", g("tilt_gain", 0.12), 9)
     append_param(lines, "RK_ATT_TILT_MAX", g("tilt_max_deg", 20.0), 9)
+    append_param(lines, "RK_ATT_ROLL_DEG", g("roll_prog_deg", 0.0), 9)
+    append_param(lines, "RK_ATT_ROLL_T0", g("roll_prog_start_s", 0.0), 9)
+    append_param(lines, "RK_ATT_ROLL_DT", g("roll_prog_dur_s", 0.0), 9)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
+
+
+def write_motor_catalog(vehicle: dict, path: Path) -> None:
+    motor_selection = vehicle.get("motor_selection", {})
+    catalog_source = motor_selection.get("catalog_source")
+    if catalog_source:
+        from tools.generate_motor_catalog import DEFAULT_SOURCE, generate_catalog
+
+        source_root = Path(catalog_source)
+        if not source_root.is_absolute():
+            source_root = REPO_ROOT / source_root
+        if source_root.exists():
+            generate_catalog(source_root, path)
+            return
+
+    write_preliminary_motor_catalog(vehicle, path)
 
 
 def write_preliminary_motor_catalog(vehicle: dict, path: Path) -> None:
@@ -483,11 +550,11 @@ def write_active_flight_profile(vehicle: dict, path: Path) -> None:
         return
 
     profile_name = active_profile["name"]
-    profile_text = yaml.safe_dump(active_profile["data"], sort_keys=False)
+    profile_text = json.dumps(active_profile["data"], indent=2, ensure_ascii=False) + "\n"
     for profile_path in (path / "etc" / "flight_profiles", path / "fs" / "microsd" / "tv3" / "flight_profiles"):
         profile_path.mkdir(parents=True, exist_ok=True)
-        (profile_path / "active.yaml").write_text(profile_text)
-        (profile_path / f"{profile_name}.yaml").write_text(profile_text)
+        (profile_path / "active.json").write_text(profile_text)
+        (profile_path / f"{profile_name}.json").write_text(profile_text)
 
 
 def write_runtime_assets(vehicle: dict, path: Path) -> None:
@@ -506,7 +573,7 @@ def write_runtime_assets(vehicle: dict, path: Path) -> None:
     (etc_path / "extras.txt").write_text(extras_text)
 
     write_px4_params(vehicle, airframe_path / f"{vehicle['name']}.params")
-    write_preliminary_motor_catalog(vehicle, motor_path)
+    write_motor_catalog(vehicle, motor_path)
     write_logger_topics(path)
     write_active_flight_profile(vehicle, path)
 

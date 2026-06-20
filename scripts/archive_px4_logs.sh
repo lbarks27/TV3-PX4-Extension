@@ -162,7 +162,7 @@ if [ -n "${VEHICLE_CONFIG}" ]; then
 		VEHICLE_CONFIG="${REPO_ROOT}/${VEHICLE_CONFIG}"
 	fi
 	if [ -f "${VEHICLE_CONFIG}" ]; then
-		cp -p "${VEHICLE_CONFIG}" "${RUN_DIR}/vehicle.yaml"
+		cp -p "${VEHICLE_CONFIG}" "${RUN_DIR}/vehicle.json"
 	fi
 fi
 
@@ -171,7 +171,7 @@ if [ -n "${FLIGHT_PROFILE}" ]; then
 		FLIGHT_PROFILE="${REPO_ROOT}/${FLIGHT_PROFILE}"
 	fi
 	if [ -f "${FLIGHT_PROFILE}" ]; then
-		cp -p "${FLIGHT_PROFILE}" "${RUN_DIR}/flight_profile.yaml"
+		cp -p "${FLIGHT_PROFILE}" "${RUN_DIR}/flight_profile.json"
 	fi
 fi
 

@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.tv3_control_allocator import load_manifest, vehicle_full_thrust_n  # noqa: E402
 from tools.tv3_guidance_envelope import (  # noqa: E402
     PHASE_WAYPOINT_TRACK,
     evaluate_profile_case,
@@ -25,17 +26,17 @@ def main() -> None:
     parser.add_argument(
         "--vehicle",
         type=Path,
-        default=REPO_ROOT / "config/vehicles/tv3_lander_v1.yaml",
+        default=REPO_ROOT / "config/vehicles/tv3_lander_v1.json",
     )
     parser.add_argument(
         "--profile",
         type=Path,
-        default=REPO_ROOT / "config/flight_profiles/lander_hover_window.yaml",
+        default=REPO_ROOT / "config/flight_profiles/lander_hover_window.json",
     )
     parser.add_argument(
         "--impossible-profile",
         type=Path,
-        default=REPO_ROOT / "config/flight_profiles/lander_impossible_guidance.yaml",
+        default=REPO_ROOT / "config/flight_profiles/lander_impossible_guidance.json",
     )
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument("--seed", type=int, default=5)
@@ -48,11 +49,12 @@ def main() -> None:
         seed=args.seed,
         phase=PHASE_WAYPOINT_TRACK,
     )
+    hover_thrust_n = vehicle_full_thrust_n(load_manifest(args.vehicle))
     impossible = evaluate_profile_case(
         args.vehicle,
         args.impossible_profile,
         phase=PHASE_WAYPOINT_TRACK,
-        thrust_n=620.0,
+        thrust_n=hover_thrust_n,
         state=None,
     )
     payload = {

@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 OUTPUT_ROOT="${REPO_ROOT}/build/barebones"
-VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-${REPO_ROOT}/config/vehicles/tv3_v1.yaml}"
+VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-${REPO_ROOT}/config/vehicles/tv3_v1.json}"
 FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-}"
 if [[ "${VEHICLE_CONFIG}" != /* ]]; then
 	VEHICLE_CONFIG="${REPO_ROOT}/${VEHICLE_CONFIG}"

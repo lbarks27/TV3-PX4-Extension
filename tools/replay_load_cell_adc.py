@@ -102,7 +102,7 @@ def main() -> int:
     parser.add_argument(
         "--vehicle",
         type=Path,
-        default=REPO_ROOT / "config/vehicles/tv3_v1.yaml",
+        default=REPO_ROOT / "config/vehicles/tv3_v1.json",
         help="Vehicle manifest for load-cell and state-machine params",
     )
     parser.add_argument("--launch-at-s", type=float, default=0.0, help="Simulated launch command time")

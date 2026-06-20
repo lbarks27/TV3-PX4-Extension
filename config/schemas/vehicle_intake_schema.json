@@ -1,0 +1,387 @@
+{
+  "schema": "tv3_vehicle_intake_v1",
+  "description": "Measured-data intake contract for TV3 vehicle manifests. These fields are intentionally explicit so physical parameters can be refreshed from measured tables before they are trusted by PX4 SIH, Hawkeye review, or bench procedures.\n",
+  "data_status_values": {
+    "measured": "field value comes from bench, scale, or correlated test data",
+    "preliminary": "CAD estimate, first-pass SITL tuning, or uncorrelated placeholder",
+    "placeholder": "structural default only; must be replaced before flight"
+  },
+  "physical_model_status_values": {
+    "measured": "kinematic tree and inertias validated against hardware",
+    "preliminary": "CAD or analytical estimate cleared for simulation only",
+    "placeholder": "schema-default structure without trusted numeric values"
+  },
+  "required_top_level": [
+    "name",
+    "description",
+    "hardware",
+    "vehicle",
+    "controller",
+    "state_machine",
+    "motor_selection",
+    "guidance",
+    "mission_profile",
+    "physical_model",
+    "data_status"
+  ],
+  "vehicle": {
+    "summary": "measured mass, CG, inertia, rail, and torque-limit data",
+    "required_fields": {
+      "body_mass_kg": {
+        "type": "float",
+        "min": 0.01,
+        "unit": "kg"
+      },
+      "body_com_x_m": {
+        "type": "float",
+        "unit": "m"
+      },
+      "motor_com_x_m": {
+        "type": "float",
+        "unit": "m"
+      },
+      "motor_loaded_mass_kg": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "kg"
+      },
+      "motor_dry_mass_kg": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "kg"
+      },
+      "rail_length_m": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "m"
+      },
+      "tvc_max_deg": {
+        "type": "float",
+        "min": 0.0,
+        "max": 90.0,
+        "unit": "deg"
+      },
+      "tvc_slew_dps": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "deg/s"
+      },
+      "ca_reference_thrust_n": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "N"
+      },
+      "ca_minimum_thrust_n": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "N"
+      },
+      "ca_fallback_thrust_n": {
+        "type": "float",
+        "min": 0.0,
+        "unit": "N"
+      },
+      "torque_limits_nm": {
+        "type": "map",
+        "min_keys": 1,
+        "unit": "Nm"
+      }
+    }
+  },
+  "hardware": {
+    "required_fields": {
+      "autopilot": {
+        "type": "string"
+      },
+      "carrier": {
+        "type": "string"
+      },
+      "ignition_output_function": {
+        "type": "int"
+      },
+      "load_cell": {
+        "required_fields": {
+          "driver": {
+            "type": "string"
+          },
+          "source": {
+            "type": "int"
+          },
+          "adc_instance": {
+            "type": "int"
+          },
+          "adc_channel": {
+            "type": "int"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "calibration": {
+            "required_fields": {
+              "tare": {
+                "type": "float"
+              },
+              "scale": {
+                "type": "float"
+              },
+              "kg_per_count": {
+                "type": "float"
+              }
+            }
+          },
+          "alpha": {
+            "type": "float",
+            "min": 0.0,
+            "max": 1.0
+          },
+          "timeout_ms": {
+            "type": "int",
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "propulsion": {
+    "required_fields": {
+      "ignition": {
+        "required_fields": {
+          "sequence": {
+            "type": "list",
+            "min_length": 1
+          }
+        }
+      },
+      "throttle": {
+        "required_fields": {
+          "mechanism": {
+            "type": "string"
+          },
+          "max_splay_deg": {
+            "type": "float",
+            "min": 0.0,
+            "max": 90.0,
+            "unit": "deg"
+          }
+        }
+      },
+      "engines": {
+        "min_count": 1,
+        "max_count": 4,
+        "per_engine_fields": {
+          "id": {
+            "type": "string"
+          },
+          "motor_index": {
+            "type": "int",
+            "min": 0
+          },
+          "motor_id": {
+            "type": "string"
+          },
+          "position_m": {
+            "type": "vec3",
+            "unit": "m"
+          },
+          "thrust_axis": {
+            "type": "unit_vec3"
+          },
+          "roll_axis": {
+            "type": "unit_vec3"
+          },
+          "yaw_axis": {
+            "type": "unit_vec3"
+          },
+          "thrust_fraction": {
+            "type": "float",
+            "min": 0.0,
+            "max": 1.0
+          },
+          "gimbal": {
+            "required_fields": {
+              "roll_max_deg": {
+                "type": "float",
+                "min": 0.0,
+                "max": 90.0,
+                "unit": "deg"
+              },
+              "yaw_max_deg": {
+                "type": "float",
+                "min": 0.0,
+                "max": 135.0,
+                "unit": "deg"
+              },
+              "roll_min_deg": {
+                "type": "float",
+                "min": -90.0,
+                "max": 0.0,
+                "unit": "deg"
+              },
+              "yaw_min_deg": {
+                "type": "float",
+                "min": -135.0,
+                "max": 135.0,
+                "unit": "deg"
+              },
+              "slew_dps": {
+                "type": "float",
+                "min": 0.0,
+                "unit": "deg/s"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "physical_model": {
+    "required_fields": {
+      "status": {
+        "type": "enum",
+        "values": [
+          "measured",
+          "preliminary",
+          "placeholder"
+        ]
+      },
+      "reference_frame": {
+        "required_fields": {
+          "origin": {
+            "type": "string"
+          },
+          "x_axis": {
+            "type": "string"
+          },
+          "y_axis": {
+            "type": "string"
+          },
+          "z_axis": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "optional_fields": {
+      "links": {
+        "type": "list"
+      },
+      "assemblies": {
+        "type": "list"
+      },
+      "joints": {
+        "type": "list"
+      },
+      "notes": {
+        "type": "list"
+      }
+    }
+  },
+  "data_status": {
+    "required_fields": {
+      "flight_ready": {
+        "type": "bool"
+      },
+      "summary": {
+        "type": "string",
+        "min_length": 8
+      }
+    },
+    "optional_fields": {
+      "fields": {
+        "type": "map",
+        "values": [
+          "measured",
+          "preliminary",
+          "placeholder"
+        ]
+      }
+    }
+  },
+  "mission_profile": {
+    "required_fields": {
+      "first_free_flight_gate": {
+        "type": "string"
+      },
+      "required_sim_gates": {
+        "type": "list",
+        "min_length": 1
+      }
+    }
+  },
+  "guidance": {
+    "required_fields": {
+      "enable": {
+        "type": "int",
+        "values": [
+          0,
+          1
+        ]
+      },
+      "min_twr": {
+        "type": "float",
+        "min": 0.1
+      },
+      "landing_twr": {
+        "type": "float",
+        "min": 0.1
+      }
+    }
+  },
+  "motor_selection": {
+    "required_fields": {
+      "index": {
+        "type": "int",
+        "min": 0
+      },
+      "catalog_root": {
+        "type": "string"
+      }
+    },
+    "optional_fields": {
+      "catalog_source": {
+        "type": "string"
+      },
+      "default_motor_id": {
+        "type": "string"
+      },
+      "motor_id": {
+        "type": "string"
+      },
+      "thrust_basis": {
+        "type": "enum",
+        "values": [
+          "max_certified",
+          "average_certified",
+          "curve_peak"
+        ]
+      }
+    }
+  },
+  "param_parity": {
+    "description": "generated PX4 params must mirror selected manifest fields",
+    "mappings": {
+      "RK_BODY_MASS_KG": "vehicle.body_mass_kg",
+      "RK_BODY_COM_X_M": "vehicle.body_com_x_m",
+      "RK_MOTOR_COM_X_M": "vehicle.motor_com_x_m",
+      "RK_RAIL_LEN_M": "vehicle.rail_length_m",
+      "RK_TVC_MAX_DEG": "vehicle.tvc_max_deg",
+      "RK_TVC_SLEW_DPS": "vehicle.tvc_slew_dps",
+      "RK_TQ_P_MAX": "vehicle.torque_limits_nm.pitch",
+      "RK_TQ_Y_MAX": "vehicle.torque_limits_nm.yaw",
+      "CA_RK_REF_THR": "vehicle.ca_reference_thrust_n",
+      "CA_RK_BODY_M": "vehicle.body_mass_kg",
+      "RK_LC_TARE": "hardware.load_cell.calibration.tare",
+      "RK_LC_SCALE": "hardware.load_cell.calibration.scale",
+      "RK_SPLAY_MAX_DEG": "propulsion.throttle.max_splay_deg"
+    }
+  },
+  "defaults": {
+    "max_engines": 4,
+    "reference_frame": {
+      "origin": "nozzle_exit_center",
+      "x_axis": "forward_along_airframe",
+      "y_axis": "vehicle_right",
+      "z_axis": "vehicle_down"
+    }
+  }
+}

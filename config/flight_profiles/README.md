@@ -6,7 +6,7 @@ geometry, hardware, propulsion, or controller configuration.
 
 Use profiles for simulator runs such as single-engine ascent, lander ignition
 sequence checks, hover windows, waypoint tracks, landing approaches, and
-abort/fault paths. Vehicle definitions stay in `config/vehicles/*.yaml`.
+abort/fault paths. Vehicle definitions stay in `config/vehicles/*.json`.
 
 ## Loading A Profile
 
@@ -14,24 +14,24 @@ Generate assets with an explicit profile:
 
 ```bash
 ./tools/generate_vehicle_assets.py \
-	--vehicle config/vehicles/tv3_lander_v1.yaml \
-	--flight-profile config/flight_profiles/lander_hover_window.yaml \
+	--vehicle config/vehicles/tv3_lander_v1.json \
+	--flight-profile config/flight_profiles/lander_hover_window.json \
 	--output build/lander_hover_window
 ```
 
 The repo scripts also accept `TV3_FLIGHT_PROFILE`:
 
 ```bash
-TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml \
-TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml \
+TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json \
+TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json \
 ./scripts/check_barebones.sh
 ```
 
 For SITL, use the profile during asset generation or full worktree preparation:
 
 ```bash
-TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml \
-TV3_FLIGHT_PROFILE=config/flight_profiles/lander_waypoint_track.yaml \
+TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json \
+TV3_FLIGHT_PROFILE=config/flight_profiles/lander_waypoint_track.json \
 ./scripts/prepare_px4_tree.sh
 ```
 
@@ -42,8 +42,11 @@ which executes profile command timelines such as arm and launch over MAVLink.
 
 ## Current Starter Profiles
 
-- `single_engine_ascent.yaml`: default `tv3_v1` ascent gate with guidance off.
-- `lander_ignition_sequence.yaml`: three-engine sequencing smoke scenario.
-- `lander_hover_window.yaml`: short local hover window for `tv3_lander_v1`.
-- `lander_waypoint_track.yaml`: nominal waypoint and landing approach scenario.
-- `lander_abort_fault_path.yaml`: future fault-injection and abort review case.
+- `single_engine_ascent.json`: default `tv3_v1` ascent gate with guidance off.
+- `lander_ignition_sequence.json`: three-engine sequencing smoke scenario.
+- `lander_hover_window.json`: short local hover window for `tv3_lander_v1` (default SIH gate).
+- `lander_offset_hover_window.json`: hover window with positional offset for force/allocator review.
+- `lander_waypoint_track.json`: nominal waypoint and landing approach scenario.
+- `lander_waypoint_track_viz.json`: waypoint track variant tuned for Hawkeye/ULog visualization review.
+- `lander_impossible_guidance.json`: guidance envelope no-solution fixture for Monte Carlo gates.
+- `lander_abort_fault_path.json`: fault-injection and abort review case.

@@ -1,0 +1,661 @@
+{
+  "name": "tv3_lander_v1",
+  "description": "TV3 three-engine splay-throttle landing vehicle for PX4 SIH validation.",
+  "data_status": {
+    "flight_ready": false,
+    "summary": "Phase 2 physical-model intake: CAD-derived preliminary masses, engine layout, splay limits, and load-cell channel map populated; measured bench data still required before flight_ready.",
+    "fields": {
+      "vehicle.body_mass_kg": "preliminary",
+      "vehicle.body_com_x_m": "preliminary",
+      "vehicle.motor_com_x_m": "preliminary",
+      "vehicle.motor_loaded_mass_kg": "preliminary",
+      "vehicle.motor_dry_mass_kg": "preliminary",
+      "vehicle.rail_length_m": "preliminary",
+      "vehicle.torque_limits_nm": "preliminary",
+      "vehicle.tvc_max_deg": "preliminary",
+      "vehicle.tvc_slew_dps": "preliminary",
+      "hardware.load_cell.calibration": "placeholder",
+      "hardware.load_cell.channels": "placeholder",
+      "hardware.load_cell.noise_counts_rms": "placeholder",
+      "physical_model.assemblies": "preliminary",
+      "physical_model.links": "preliminary",
+      "physical_model.joints": "preliminary",
+      "propulsion.engines": "preliminary",
+      "propulsion.engines.position_m": "preliminary",
+      "propulsion.engines.gimbal": "placeholder",
+      "propulsion.engines.gimbal.backlash_deg": "placeholder"
+    }
+  },
+  "variant": {
+    "role": "three_engine_lander",
+    "first_free_flight_gate": false,
+    "roadmap_phase": 2
+  },
+  "hardware": {
+    "autopilot": "cube_orange_plus",
+    "carrier": "mini_carrier",
+    "telemetry": "rfd900",
+    "gps": {
+      "rover": "here4_rtk",
+      "base": "here4_rtk_base"
+    },
+    "ignition_output_function": 450,
+    "tvc_pitch_output_function": 201,
+    "tvc_yaw_output_function": 202,
+    "load_cell": {
+      "driver": "ads1115",
+      "source": 1,
+      "adc_instance": 1,
+      "adc_channel": 0,
+      "negative_channel": 1,
+      "mode": "differential",
+      "calibration": {
+        "tare": 0.0,
+        "scale": 1.0,
+        "kg_per_count": 0.0
+      },
+      "alpha": 0.25,
+      "deadband_counts": 0.0,
+      "noise_counts_rms": 0.0,
+      "publish_rate_hz": 10,
+      "timeout_ms": 200,
+      "channels": [
+        {
+          "engine_id": "engine_0",
+          "adc_instance": 1,
+          "adc_channel": 0,
+          "negative_channel": 1,
+          "calibration": {
+            "tare": 0.0,
+            "scale": 1.0,
+            "kg_per_count": 0.0
+          }
+        },
+        {
+          "engine_id": "engine_1",
+          "adc_instance": 1,
+          "adc_channel": 1,
+          "negative_channel": 2,
+          "calibration": {
+            "tare": 0.0,
+            "scale": 1.0,
+            "kg_per_count": 0.0
+          }
+        },
+        {
+          "engine_id": "engine_2",
+          "adc_instance": 1,
+          "adc_channel": 2,
+          "negative_channel": 3,
+          "calibration": {
+            "tare": 0.0,
+            "scale": 1.0,
+            "kg_per_count": 0.0
+          }
+        }
+      ]
+    }
+  },
+  "vehicle": {
+    "body_mass_kg": 1.6,
+    "body_com_x_m": 0.72,
+    "motor_com_x_m": 0.0,
+    "motor_loaded_mass_kg": 0.75,
+    "motor_dry_mass_kg": 0.28,
+    "rail_length_m": 3.5,
+    "tvc_max_deg": 35.0,
+    "tvc_slew_dps": 220.0,
+    "ca_reference_thrust_n": 92.64,
+    "ca_minimum_thrust_n": 16.965,
+    "ca_fallback_thrust_n": 33.93,
+    "torque_limits_nm": {
+      "roll": 8.0,
+      "pitch": 16.0,
+      "yaw": 16.0
+    }
+  },
+  "physical_model": {
+    "status": "preliminary",
+    "reference_frame": {
+      "origin": "nozzle_exit_center",
+      "x_axis": "forward_along_airframe",
+      "y_axis": "vehicle_right",
+      "z_axis": "vehicle_down"
+    },
+    "notes": [
+      "Engine mount points lie in the Y-Z plane at x=0 m, 98 mm from the nozzle-exit origin on a 120-degree triangular pattern.",
+      "Engine frame axes are built incrementally: (1) thrust reference +X, (2) primary roll axis mount-to-origin, (3) secondary yaw axis perpendicular.",
+      "Kinematics: roll (+/-90 deg) is about the fixed primary axis toward origin; yaw (0-135 deg) is about the secondary axis carried through roll (yaw coupled to roll).",
+      "Phase 2 intake: vehicle.body_mass_kg is the fixed structure without motors; motor_loaded_mass_kg is per-engine wet propellant mass.",
+      "preliminary_total_with_loaded_motors sums body plus three loaded motors for SIH mass-budget review.",
+      "Replace masses, COMs, inertia tensors, engine positions, splay axes, trims, backlash, and load-cell calibration with measured bench data before flight.",
+      "Large-angle splay is the throttle mechanism; actuator limits, slew rates, and backlash must be measured before hover tests.",
+      "CAD visual meshes live under deprecated/sim/gazebo/assets/cad/lander/; STEP sources are not yet checked in for the lander."
+    ],
+    "assemblies": [
+      {
+        "id": "base_vehicle_without_motors",
+        "total_mass_kg": 1.6,
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_about_origin_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        }
+      },
+      {
+        "id": "preliminary_total_with_loaded_motors",
+        "total_mass_kg": 3.85,
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_about_origin_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        }
+      }
+    ],
+    "links": [
+      {
+        "id": "body",
+        "description": "Fixed lander structure excluding moving nozzle/splay links.",
+        "parent": "model",
+        "mass_kg": 1.6,
+        "pose_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_static_structure.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_0",
+        "description": "Engine 0 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          0.098,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_1",
+        "description": "Engine 1 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_2",
+        "description": "Engine 2 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      }
+    ],
+    "joints": [
+      {
+        "id": "engine_0_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_0",
+        "origin_m": [
+          0.0,
+          0.098,
+          0.0
+        ],
+        "axis": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_0_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_0",
+        "origin_m": [
+          0.0,
+          0.098,
+          0.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_1_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_1",
+        "origin_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.5,
+          -0.866025403784
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_1_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_1",
+        "origin_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.866025403784,
+          0.5
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_2_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_2",
+        "origin_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.5,
+          0.866025403784
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_2_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_2",
+        "origin_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498
+        ],
+        "axis": [
+          0.0,
+          -0.866025403784,
+          0.5
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      }
+    ]
+  },
+  "propulsion": {
+    "engine_count": 3,
+    "ignition": {
+      "mode": "load_cell_confirmed_sequence",
+      "sequence": [
+        0,
+        1,
+        2
+      ],
+      "dwell_ms": 150,
+      "timeout_ms": 2000,
+      "confirmation_threshold_n": 10.0
+    },
+    "throttle": {
+      "mechanism": "secondary_axis_collective",
+      "max_splay_deg": 90.0,
+      "slew_dps": 220.0
+    },
+    "engines": [
+      {
+        "id": "engine_0",
+        "motor_index": 0,
+        "ignition_output_function": 450,
+        "load_cell_channel": 0,
+        "position_m": [
+          0.0,
+          0.098,
+          0.0
+        ],
+        "thrust_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "roll_axis": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "yaw_axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "thrust_fraction": 0.333333,
+        "gimbal": {
+          "roll_min_deg": -90.0,
+          "roll_max_deg": 90.0,
+          "yaw_min_deg": 0.0,
+          "yaw_max_deg": 135.0,
+          "splay_max_deg": 35.0,
+          "slew_dps": 220.0,
+          "roll_trim": 0.0,
+          "yaw_trim": 0.0,
+          "roll_backlash_deg": 0.0,
+          "yaw_backlash_deg": 0.0,
+          "splay_backlash_deg": 0.0
+        },
+        "motor_id": "aerotech-g12"
+      },
+      {
+        "id": "engine_1",
+        "motor_index": 1,
+        "ignition_output_function": 451,
+        "load_cell_channel": 1,
+        "position_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498
+        ],
+        "thrust_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "roll_axis": [
+          -0.0,
+          0.5,
+          -0.866025403784
+        ],
+        "yaw_axis": [
+          -0.0,
+          0.866025403784,
+          0.5
+        ],
+        "thrust_fraction": 0.333333,
+        "gimbal": {
+          "roll_min_deg": -90.0,
+          "roll_max_deg": 90.0,
+          "yaw_min_deg": 0.0,
+          "yaw_max_deg": 135.0,
+          "splay_max_deg": 35.0,
+          "slew_dps": 220.0,
+          "roll_trim": 0.0,
+          "yaw_trim": 0.0,
+          "roll_backlash_deg": 0.0,
+          "yaw_backlash_deg": 0.0,
+          "splay_backlash_deg": 0.0
+        },
+        "motor_id": "aerotech-g12"
+      },
+      {
+        "id": "engine_2",
+        "motor_index": 2,
+        "ignition_output_function": 452,
+        "load_cell_channel": 2,
+        "position_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498
+        ],
+        "thrust_axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "roll_axis": [
+          -0.0,
+          0.5,
+          0.866025403784
+        ],
+        "yaw_axis": [
+          0.0,
+          -0.866025403784,
+          0.5
+        ],
+        "thrust_fraction": 0.333334,
+        "gimbal": {
+          "roll_min_deg": -90.0,
+          "roll_max_deg": 90.0,
+          "yaw_min_deg": 0.0,
+          "yaw_max_deg": 135.0,
+          "splay_max_deg": 35.0,
+          "slew_dps": 220.0,
+          "roll_trim": 0.0,
+          "yaw_trim": 0.0,
+          "roll_backlash_deg": 0.0,
+          "yaw_backlash_deg": 0.0,
+          "splay_backlash_deg": 0.0
+        },
+        "motor_id": "aerotech-g12"
+      }
+    ]
+  },
+  "controller": {
+    "attitude_p": {
+      "rail": 2.0,
+      "free": 4.0,
+      "boost": 10.0
+    },
+    "rate_p": {
+      "rail": 0.35,
+      "free": 1.0,
+      "boost": 2.5
+    },
+    "rate_i": 0.08,
+    "rate_d": 0.003,
+    "integrator_limit_boost": 20.0
+  },
+  "state_machine": {
+    "command_source": 1,
+    "ignition_pulse_ms": 300,
+    "ignition_timeout_ms": 2000,
+    "launch_threshold_n": 10.0,
+    "burnout_threshold_n": 4.0,
+    "burnout_dwell_ms": 100,
+    "minimum_burn_ms": 150,
+    "maximum_burn_ms": 45000,
+    "abort_on_gcs_loss": 0
+  },
+  "motor_selection": {
+    "index": 0,
+    "catalog_root": "/fs/microsd/tv3/motors",
+    "catalog_source": "config/thrust_curves",
+    "default_motor_id": "aerotech-g12",
+    "thrust_basis": "max_certified"
+  },
+  "guidance": {
+    "enable": 1,
+    "takeoff_alt_m": 10.0,
+    "apex_alt_m": 45.0,
+    "pos_p": 0.15,
+    "vel_max_m_s": 12.0,
+    "vel_up_m_s": 8.0,
+    "vel_dn_m_s": 4.0,
+    "yaw_deg": 0.0,
+    "hold_alt_m": 5.0,
+    "acceptance_m": 15.0,
+    "min_twr": 1.05,
+    "landing_twr": 1.15,
+    "min_remaining_impulse_ns": 0.0,
+    "wp1_n_m": 20.0,
+    "wp1_e_m": 0.0,
+    "wp1_d_m": -15.0,
+    "wp2_n_m": 35.0,
+    "wp2_e_m": 10.0,
+    "wp2_d_m": -20.0,
+    "wp3_n_m": 15.0,
+    "wp3_e_m": 0.0,
+    "wp3_d_m": -12.0,
+    "land_n_m": 0.0,
+    "land_e_m": 0.0,
+    "land_d_m": 0.0,
+    "sim_groundtruth_fallback": 1
+  },
+  "mission_profile": {
+    "first_free_flight_gate": "single_engine_ascent",
+    "required_sim_gates": [
+      "sih_force_response",
+      "load_cell_confirmed_sequence",
+      "hover_window",
+      "waypoint_track",
+      "landing_approach"
+    ]
+  }
+}

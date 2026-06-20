@@ -11,14 +11,23 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SCHEMA = REPO_ROOT / "config/schemas/vehicle_intake_schema.yaml"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.tv3_control_allocator import (  # noqa: E402
+    axes_close,
+    dot,
+    normalize,
+    outward_radial_axis,
+)
+from tools.tv3_engine_frame import build_engine_frame_axes  # noqa: E402
+from tools.tv3_motor_catalog import load_motor_catalog, resolve_motor_id  # noqa: E402
+
+DEFAULT_SCHEMA = REPO_ROOT / "config/schemas/vehicle_intake_schema.json"
 VEHICLE_MANIFESTS = (
-    REPO_ROOT / "config/vehicles/tv3_v1.yaml",
-    REPO_ROOT / "config/vehicles/tv3_lander_v1.yaml",
+    REPO_ROOT / "config/vehicles/tv3_v1.json",
+    REPO_ROOT / "config/vehicles/tv3_lander_v1.json",
 )
 
 DATA_STATUS_VALUES = {"measured", "preliminary", "placeholder"}
@@ -40,10 +49,10 @@ class ValidationReport:
     metrics: dict = field(default_factory=dict)
 
 
-def load_yaml(path: Path) -> dict:
-    data = yaml.safe_load(path.read_text())
+def load_json(path: Path) -> dict:
+    data = json.loads(path.read_text())
     if not isinstance(data, dict):
-        raise ValueError(f"expected YAML mapping: {path}")
+        raise ValueError(f"expected JSON object: {path}")
     return data
 
 
@@ -80,15 +89,15 @@ def engines_from_manifest(manifest: dict) -> list[dict]:
             "load_cell_channel": load_cell.get("adc_channel", 0),
             "position_m": [body["motor_com_x_m"], 0.0, 0.0],
             "thrust_axis": [1.0, 0.0, 0.0],
-            "pitch_axis": [0.0, -1.0, 0.0],
+            "roll_axis": [0.0, -1.0, 0.0],
             "yaw_axis": [0.0, 0.0, -1.0],
             "thrust_fraction": 1.0,
             "gimbal": {
-                "pitch_max_deg": body["tvc_max_deg"],
+                "roll_max_deg": body["tvc_max_deg"],
                 "yaw_max_deg": body["tvc_max_deg"],
                 "splay_max_deg": body["tvc_max_deg"],
                 "slew_dps": body["tvc_slew_dps"],
-                "pitch_trim": 0.0,
+                "roll_trim": 0.0,
                 "yaw_trim": 0.0,
             },
         }
@@ -226,8 +235,10 @@ def validate_manifest(manifest: dict, manifest_path: Path, schema: dict) -> Vali
     seen_ids: set[str] = set()
     for index, engine in enumerate(engines):
         engine_id = engine.get("id", f"engine_{index}")
-        for axis_name in ("thrust_axis", "pitch_axis", "yaw_axis"):
+        for axis_name in ("thrust_axis", "roll_axis", "yaw_axis"):
             axis = engine.get(axis_name)
+            if axis_name == "roll_axis" and axis is None:
+                axis = engine.get("pitch_axis")
             ok = isinstance(axis, list) and len(axis) == 3 and all(is_number(v) for v in axis)
             if ok:
                 norm = vec_norm([float(v) for v in axis])
@@ -249,13 +260,85 @@ def validate_manifest(manifest: dict, manifest_path: Path, schema: dict) -> Vali
         seen_ids.add(engine_id)
 
         gimbal = engine.get("gimbal", {})
-        for gkey in ("pitch_max_deg", "yaw_max_deg", "slew_dps"):
-            value = gimbal.get(gkey)
+        for gkey in ("roll_max_deg", "yaw_max_deg", "slew_dps"):
+            value = gimbal.get(gkey, gimbal.get("pitch_max_deg") if gkey == "roll_max_deg" else None)
             checks.append(
                 CheckResult(
                     f"{engine_id}.gimbal.{gkey}",
                     is_number(value) and float(value) >= 0.0,
                     f"value={value}",
+                )
+            )
+        roll_max = (
+            float(gimbal["roll_max_deg"])
+            if is_number(gimbal.get("roll_max_deg"))
+            else float(gimbal["pitch_max_deg"])
+            if is_number(gimbal.get("pitch_max_deg"))
+            else None
+        )
+        yaw_max = float(gimbal["yaw_max_deg"]) if is_number(gimbal.get("yaw_max_deg")) else None
+        roll_min = float(
+            gimbal.get("roll_min_deg", gimbal.get("pitch_min_deg", -(roll_max or 0.0)))
+        )
+        yaw_min = float(gimbal.get("yaw_min_deg", -(yaw_max or 0.0)))
+        if roll_max is not None:
+            checks.append(
+                CheckResult(
+                    f"{engine_id}.gimbal.roll_range",
+                    is_number(gimbal.get("roll_min_deg", gimbal.get("pitch_min_deg", roll_min)))
+                    and roll_min <= roll_max,
+                    f"[{roll_min:+.1f}, {roll_max:+.1f}] deg",
+                )
+            )
+        position_m = engine.get("position_m", [0.0, 0.0, 0.0])
+        is_lander = manifest.get("variant", {}).get("role") == "three_engine_lander"
+        if is_lander:
+            expected = build_engine_frame_axes(position_m)
+            for axis_name, expected_axis, manifest_key in (
+                ("thrust_axis", expected.thrust_axis, "thrust_axis"),
+                ("roll_axis", expected.primary_axis, "roll_axis"),
+                ("yaw_axis", expected.secondary_axis, "yaw_axis"),
+            ):
+                manifest_axis = engine.get(manifest_key, engine.get("pitch_axis") if manifest_key == "roll_axis" else None)
+                if isinstance(manifest_axis, list) and len(manifest_axis) == 3:
+                    checks.append(
+                        CheckResult(
+                            f"{engine_id}.{axis_name}_matches_builder",
+                            axes_close(manifest_axis, expected_axis),
+                            f"expected {[round(v, 6) for v in expected_axis]}",
+                        )
+                    )
+            thrust_axis = expected.thrust_axis
+            roll_axis = expected.primary_axis
+            yaw_axis = expected.secondary_axis
+        else:
+            thrust_axis = normalize(
+                engine.get("thrust_axis", outward_radial_axis(position_m)),
+                outward_radial_axis(position_m),
+            )
+            roll_axis = normalize(
+                engine.get("roll_axis", engine.get("pitch_axis", [0.0, -1.0, 0.0])),
+                (0.0, -1.0, 0.0),
+            )
+            yaw_axis = normalize(engine.get("yaw_axis", [0.0, 0.0, -1.0]), (0.0, 0.0, -1.0))
+        orthogonality = (
+            abs(dot(thrust_axis, roll_axis)) <= 0.02
+            and abs(dot(thrust_axis, yaw_axis)) <= 0.02
+            and abs(dot(roll_axis, yaw_axis)) <= 0.02
+        )
+        checks.append(
+            CheckResult(
+                f"{engine_id}.gimbal_axes_orthogonal",
+                orthogonality,
+                "thrust, roll, and yaw must be mutually perpendicular",
+            )
+        )
+        if yaw_max is not None:
+            checks.append(
+                CheckResult(
+                    f"{engine_id}.gimbal.yaw_range",
+                    is_number(gimbal.get("yaw_min_deg", yaw_min)) and yaw_min <= yaw_max,
+                    f"[{yaw_min:+.1f}, {yaw_max:+.1f}] deg",
                 )
             )
 
@@ -266,6 +349,28 @@ def validate_manifest(manifest: dict, manifest_path: Path, schema: dict) -> Vali
             f"sum={thrust_sum:.6f}",
         )
     )
+
+    motor_selection = manifest.get("motor_selection", {})
+    catalog_source = motor_selection.get("catalog_source")
+    if catalog_source:
+        catalog = load_motor_catalog(str(catalog_source))
+        checks.append(
+            CheckResult(
+                "motor_catalog_loaded",
+                bool(catalog),
+                f"source={catalog_source} motors={len(catalog)}",
+            )
+        )
+        for index, engine in enumerate(engines):
+            engine_id = engine.get("id", f"engine_{index}")
+            motor_id = resolve_motor_id(engine, motor_selection)
+            checks.append(
+                CheckResult(
+                    f"{engine_id}.motor_id_catalog",
+                    bool(motor_id) and motor_id in catalog,
+                    f"motor_id={motor_id or 'missing'}",
+                )
+            )
 
     sequence = ignition_sequence(manifest, engines)
     checks.append(
@@ -374,12 +479,12 @@ def validate_param_parity(manifest: dict, manifest_path: Path, schema: dict) -> 
 
 
 def validate_all(schema_path: Path = DEFAULT_SCHEMA, manifests: list[Path] | None = None) -> list[ValidationReport]:
-    schema = load_yaml(schema_path)
+    schema = load_json(schema_path)
     manifest_paths = manifests or list(VEHICLE_MANIFESTS)
     reports: list[ValidationReport] = []
 
     for manifest_path in manifest_paths:
-        manifest = load_yaml(manifest_path)
+        manifest = load_json(manifest_path)
         report = validate_manifest(manifest, manifest_path, schema)
         parity_checks = validate_param_parity(manifest, manifest_path, schema)
         report.checks.extend(parity_checks)
@@ -403,7 +508,7 @@ def print_report(report: ValidationReport) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate TV3 vehicle manifests.")
-    parser.add_argument("manifest", nargs="*", type=Path, help="Vehicle manifest YAML paths")
+    parser.add_argument("manifest", nargs="*", type=Path, help="Vehicle manifest JSON paths")
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

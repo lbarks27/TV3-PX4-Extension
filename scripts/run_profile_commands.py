@@ -8,12 +8,12 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
+import json
 from pymavlink import mavutil
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.yaml"
+DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.json"
 TV3_COMMAND = 31010
 TV3_ACTIONS = {
     "launch": 1.0,
@@ -30,7 +30,7 @@ def resolve_repo_path(value: str | None, default: Path) -> Path:
 
 
 def load_commands(profile_path: Path) -> list[dict]:
-    profile = yaml.safe_load(profile_path.read_text())
+    profile = json.loads(profile_path.read_text())
     commands = profile.get("commands", [])
     if not isinstance(commands, list):
         raise ValueError(f"profile commands must be a list: {profile_path}")
@@ -38,7 +38,7 @@ def load_commands(profile_path: Path) -> list[dict]:
 
 
 def profile_allows_force_arm(profile_path: Path) -> bool:
-    profile = yaml.safe_load(profile_path.read_text())
+    profile = json.loads(profile_path.read_text())
     scenario = profile.get("scenario", {})
     return bool(scenario.get("simulated_only")) and scenario.get("simulator") == "sih"
 
@@ -113,7 +113,7 @@ def main() -> int:
     parser.add_argument(
         "--flight-profile",
         default=os.environ.get("TV3_FLIGHT_PROFILE"),
-        help="TV3 flight profile YAML. Defaults to the lander hover-window profile.",
+        help="TV3 flight profile JSON. Defaults to the lander hover-window profile.",
     )
     parser.add_argument(
         "--connect",

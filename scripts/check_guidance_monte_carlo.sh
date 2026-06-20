@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_guidance_envelope -v
 
-if [ ! -f "${REPO_ROOT}/config/flight_profiles/lander_impossible_guidance.yaml" ]; then
+if [ ! -f "${REPO_ROOT}/config/flight_profiles/lander_impossible_guidance.json" ]; then
 	printf 'missing impossible guidance profile\n' >&2
 	exit 1
 fi

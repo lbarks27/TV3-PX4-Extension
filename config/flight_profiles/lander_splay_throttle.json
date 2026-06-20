@@ -1,0 +1,83 @@
+{
+  "schema": "tv3_flight_profile_v1",
+  "name": "lander_splay_throttle",
+  "description": "Hover scenario that exercises collective splay throttling as guidance modulates net thrust demand.",
+  "vehicle": "tv3_lander_v1",
+  "scenario": {
+    "type": "hover_window",
+    "simulator": "sih",
+    "intent": "Show identical commanded_yaw_deg (secondary-axis splay throttle) on all engines while primary-axis pitch handles attitude TVC.",
+    "simulated_only": true
+  },
+  "guidance": {
+    "enable": 1,
+    "ascent_mode": "hover_window",
+    "apogee_mode": "skip",
+    "landing_mode": "skip",
+    "takeoff_alt_m": 8.0,
+    "apex_alt_m": 20.0,
+    "pos_p": 0.28,
+    "tilt_gain": 0.0,
+    "tilt_max_deg": 0.0,
+    "vel_max_m_s": 8.0,
+    "vel_up_m_s": 5.5,
+    "vel_dn_m_s": 4.0,
+    "yaw_deg": 0.0,
+    "hold_alt_m": 8.0,
+    "acceptance_m": 4.0,
+    "min_twr": 1.05,
+    "landing_twr": 1.15,
+    "min_remaining_impulse_ns": 0.0,
+    "wp1_n_m": 0.0,
+    "wp1_e_m": 0.0,
+    "wp1_d_m": -8.0,
+    "wp2_n_m": 0.0,
+    "wp2_e_m": 0.0,
+    "wp2_d_m": -16.0,
+    "wp2_mode": "position_hold",
+    "wp2_hold_s": 6.0,
+    "wp3_n_m": 0.0,
+    "wp3_e_m": 0.0,
+    "wp3_d_m": -6.0,
+    "wp3_mode": "position_hold",
+    "wp3_hold_s": 8.0,
+    "land_n_m": 0.0,
+    "land_e_m": 0.0,
+    "land_d_m": 0.0,
+    "sim_groundtruth_fallback": 1
+  },
+  "mission_profile": {
+    "first_free_flight_gate": "single_engine_ascent",
+    "required_sim_gates": [
+      "sih_force_response",
+      "hover_window",
+      "collective_splay_throttle"
+    ]
+  },
+  "commands": [
+    {
+      "at_s": 0.0,
+      "action": "arm_and_ready"
+    },
+    {
+      "at_s": 1.0,
+      "action": "launch"
+    }
+  ],
+  "review": {
+    "min_hover_s": 4.0,
+    "required_topics": [
+      "tv3_guidance_status",
+      "tv3_engine_command",
+      "tv3_engine_state",
+      "vehicle_attitude",
+      "vehicle_local_position",
+      "vehicle_torque_setpoint"
+    ],
+    "success_criteria": [
+      "commanded_yaw_deg is identical across active engines (collective secondary-axis throttle)",
+      "secondary-axis yaw increases when required_thrust_n drops relative to chamber thrust",
+      "net body +X thrust tracks guidance without per-engine thrust scaling"
+    ]
+  }
+}

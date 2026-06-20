@@ -23,6 +23,6 @@ done
 
 python3 "${REPO_ROOT}/tools/replay_load_cell_adc.py" \
 	"${REPO_ROOT}/tests/fixtures/load_cell_adc/delayed_ignition.csv" \
-	--vehicle "${REPO_ROOT}/config/vehicles/tv3_v1.yaml" >/dev/null
+	--vehicle "${REPO_ROOT}/config/vehicles/tv3_v1.json" >/dev/null
 
 printf 'Phase 3 propulsion-semantics gate passed\n'

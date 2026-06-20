@@ -4,8 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
-export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.yaml}"
-export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.yaml}"
+export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.json}"
+export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.json}"
 export TV3_SIM_DURATION_S="${TV3_SIM_DURATION_S:-90}"
 export TV3_LOG_RUN_ID="${TV3_LOG_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-phase1-headless}"
 export TV3_RUN_PROFILE_COMMANDS="${TV3_RUN_PROFILE_COMMANDS:-1}"

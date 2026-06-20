@@ -10,11 +10,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-import yaml
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.yaml"
+DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.json"
 
 TV3_STATUS_FAULT_SENSOR_STALE = 4
 TV3_STATUS_FAULT_MOTOR_DATA = 16
@@ -84,7 +81,7 @@ def topic_names(ulog) -> set[str]:
 
 
 def load_profile(path: Path) -> dict:
-    profile = yaml.safe_load(path.read_text())
+    profile = json.loads(path.read_text())
     if not isinstance(profile, dict):
         raise ValueError(f"invalid flight profile: {path}")
     return profile
@@ -99,9 +96,9 @@ def vehicle_body_mass_kg(profile: dict, profile_path: Path, default: float = 4.0
 
     vehicle_ref = vehicle if isinstance(vehicle, str) else profile.get("name")
     if isinstance(vehicle_ref, str) and vehicle_ref:
-        vehicle_path = REPO_ROOT / "config/vehicles" / f"{vehicle_ref}.yaml"
+        vehicle_path = REPO_ROOT / "config/vehicles" / f"{vehicle_ref}.json"
         if not vehicle_path.exists():
-            vehicle_path = profile_path.parent.parent / "vehicles" / f"{vehicle_ref}.yaml"
+            vehicle_path = profile_path.parent.parent / "vehicles" / f"{vehicle_ref}.json"
         if vehicle_path.exists():
             manifest = load_profile(vehicle_path)
             manifest_vehicle = manifest.get("vehicle")
@@ -424,7 +421,7 @@ def main() -> int:
     parser.add_argument(
         "--flight-profile",
         default=str(DEFAULT_PROFILE),
-        help="Flight profile YAML with review criteria",
+        help="Flight profile JSON with review criteria",
     )
     parser.add_argument("--latest", action="store_true", help="Use the newest archived sim ULog")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable text")

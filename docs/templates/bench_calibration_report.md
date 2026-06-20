@@ -74,23 +74,34 @@ with ground-test logs under `logs/ground/`.
 
 ## Manifest Update
 
-After this report is approved, update the selected vehicle manifest:
+After this report is approved, update the selected vehicle manifest (`config/vehicles/<vehicle>.json`):
 
-```yaml
-data_status:
-  fields:
-    hardware.load_cell.calibration: measured
-hardware:
-  load_cell:
-    calibration:
-      tare: <measured>
-      scale: <measured>
-      kg_per_count: <measured or 0.0>
+```json
+{
+  "data_status": {
+    "fields": {
+      "hardware.load_cell.calibration": "measured"
+    }
+  },
+  "hardware": {
+    "load_cell": {
+      "calibration": {
+        "tare": 0.0,
+        "scale": 0.0,
+        "kg_per_count": 0.0
+      }
+    }
+  }
+}
 ```
+
+Replace the placeholder numbers with measured values from the tables above.
 
 Re-run:
 
 ```bash
+./scripts/stage_microsd.sh
+./scripts/complete_phase2_bench.sh --body-mass-kg <weighed_body_kg>
 ./scripts/check_physical_manifests.sh
 ./scripts/check_propulsion_semantics.sh
 ```

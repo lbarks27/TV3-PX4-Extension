@@ -18,10 +18,12 @@ def load_module(path: Path):
 
 
 envelope = load_module(REPO_ROOT / "tools/tv3_guidance_envelope.py")
+allocator = load_module(REPO_ROOT / "tools/tv3_control_allocator.py")
 
-LANDER = REPO_ROOT / "config/vehicles/tv3_lander_v1.yaml"
-HOVER_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.yaml"
-IMPOSSIBLE_PROFILE = REPO_ROOT / "config/flight_profiles/lander_impossible_guidance.yaml"
+LANDER = REPO_ROOT / "config/vehicles/tv3_lander_v1.json"
+HOVER_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.json"
+IMPOSSIBLE_PROFILE = REPO_ROOT / "config/flight_profiles/lander_impossible_guidance.json"
+LANDER_HOVER_THRUST_N = allocator.vehicle_full_thrust_n(allocator.load_manifest(LANDER))
 
 
 class GuidanceEnvelopeTests(unittest.TestCase):
@@ -30,11 +32,11 @@ class GuidanceEnvelopeTests(unittest.TestCase):
             LANDER,
             HOVER_PROFILE,
             phase=envelope.PHASE_LAUNCH_ASCENT,
-            thrust_n=620.0,
+            thrust_n=LANDER_HOVER_THRUST_N,
             state=envelope.GuidanceVehicleState(
                 phase=envelope.PHASE_LAUNCH_ASCENT,
                 altitude_m=8.0,
-                required_thrust_n=620.0,
+                required_thrust_n=LANDER_HOVER_THRUST_N,
             ),
         )
         self.assertTrue(result.solution_valid, result)
@@ -44,7 +46,7 @@ class GuidanceEnvelopeTests(unittest.TestCase):
             LANDER,
             IMPOSSIBLE_PROFILE,
             phase=envelope.PHASE_LAUNCH_ASCENT,
-            thrust_n=620.0,
+            thrust_n=LANDER_HOVER_THRUST_N,
         )
         self.assertFalse(result.solution_valid)
         self.assertIn(
@@ -55,11 +57,11 @@ class GuidanceEnvelopeTests(unittest.TestCase):
     def test_impossible_profile_rejects_impulse_reserve(self) -> None:
         config = envelope.load_guidance_config(envelope.load_flight_profile(IMPOSSIBLE_PROFILE))
         vehicle = envelope.load_manifest(LANDER)
-        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=620.0)
+        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=LANDER_HOVER_THRUST_N)
         config.min_remaining_impulse_ns = 100.0
         state = envelope.GuidanceVehicleState(
             phase=envelope.PHASE_LAUNCH_ASCENT,
-            required_thrust_n=620.0,
+            required_thrust_n=LANDER_HOVER_THRUST_N,
             remaining_impulse_ns=50.0,
         )
         result = envelope.evaluate_envelope(vehicle, config, motor_reference, state)
@@ -71,16 +73,16 @@ class GuidanceEnvelopeTests(unittest.TestCase):
         vehicle = envelope.load_manifest(LANDER)
         motor_reference = envelope.motor_reference_for_state(
             vehicle,
-            thrust_n=620.0,
-            mass_kg=50.0,
+            thrust_n=LANDER_HOVER_THRUST_N,
+            mass_kg=float(vehicle["vehicle"]["body_mass_kg"]),
         )
         state = envelope.GuidanceVehicleState(
             phase=envelope.PHASE_LANDING_APPROACH,
             altitude_m=120.0,
             mission_started=True,
-            required_thrust_n=620.0,
+            required_thrust_n=LANDER_HOVER_THRUST_N,
             landing_point_ned=(0.0, 0.0, 0.0),
-            remaining_impulse_ns=200.0,
+            remaining_impulse_ns=15.0,
         )
         result = envelope.evaluate_envelope(vehicle, config, motor_reference, state)
         self.assertFalse(result.solution_valid)
@@ -89,14 +91,14 @@ class GuidanceEnvelopeTests(unittest.TestCase):
     def test_abort_corridor_rejects_far_offset_with_low_delta_v(self) -> None:
         config = envelope.load_guidance_config(envelope.load_flight_profile(HOVER_PROFILE))
         vehicle = envelope.load_manifest(LANDER)
-        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=620.0)
+        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=LANDER_HOVER_THRUST_N)
         state = envelope.GuidanceVehicleState(
             phase=envelope.PHASE_LAUNCH_ASCENT,
             altitude_m=5.0,
             position_ned=(500.0, 300.0, -5.0),
             velocity_sp=(2.0, 1.0, -1.0),
             mission_started=True,
-            required_thrust_n=620.0,
+            required_thrust_n=LANDER_HOVER_THRUST_N,
             landing_point_ned=(0.0, 0.0, 0.0),
             remaining_impulse_ns=15.0,
         )
@@ -107,13 +109,13 @@ class GuidanceEnvelopeTests(unittest.TestCase):
     def test_excessive_lateral_command_rejects_control_envelope(self) -> None:
         config = envelope.load_guidance_config(envelope.load_flight_profile(HOVER_PROFILE))
         vehicle = envelope.load_manifest(LANDER)
-        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=620.0)
+        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=LANDER_HOVER_THRUST_N)
         state = envelope.GuidanceVehicleState(
             phase=envelope.PHASE_WAYPOINT_TRACK,
             altitude_m=10.0,
             velocity_sp=(30.0, 0.0, 0.0),
             mission_started=True,
-            required_thrust_n=620.0,
+            required_thrust_n=LANDER_HOVER_THRUST_N,
             landing_point_ned=(0.0, 0.0, 0.0),
         )
         result = envelope.evaluate_envelope(vehicle, config, motor_reference, state)
@@ -128,7 +130,7 @@ class GuidanceEnvelopeTests(unittest.TestCase):
             seed=11,
             phase=envelope.PHASE_WAYPOINT_TRACK,
             altitude_m=12.0,
-            required_thrust_n=620.0,
+            required_thrust_n=LANDER_HOVER_THRUST_N,
         )
         self.assertEqual(24, report.samples)
         self.assertGreater(report.valid_count, 0)

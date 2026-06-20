@@ -42,8 +42,8 @@ param set-default RK_GD_WP3_D -75.0
 param set-default RK_GD_LAND_N 0.0
 param set-default RK_GD_LAND_E 0.0
 param set-default RK_GD_LAND_D 0.0
-param set-default RK_GD_ASCENT_MODE 0
-param set-default RK_GD_APOGEE_MODE 0
+param set-default RK_GD_ASC_MODE 0
+param set-default RK_GD_APX_MODE 0
 param set-default RK_GD_LAND_MODE 0
 param set-default RK_GD_WP1_MODE 0
 param set-default RK_GD_WP2_MODE 0
@@ -54,6 +54,6 @@ param set-default RK_GD_WP3_HOLD_S 0.0
 param set-default RK_GD_WP1_ACC_M 0.0
 param set-default RK_GD_WP2_ACC_M 0.0
 param set-default RK_GD_WP3_ACC_M 0.0
-param set-default RK_GD_WP1_CRUISE_MS 0.0
-param set-default RK_GD_WP2_CRUISE_MS 0.0
-param set-default RK_GD_WP3_CRUISE_MS 0.0
+param set-default RK_GD_WP1_C_MS 0.0
+param set-default RK_GD_WP2_C_MS 0.0
+param set-default RK_GD_WP3_C_MS 0.0

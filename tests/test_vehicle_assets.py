@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import yaml
+import json
 
 
 def load_module(path: Path):
@@ -36,7 +36,7 @@ def generated_param_values(output: Path, vehicle_name: str = "tv3_v1") -> dict[s
 class VehicleAssetTests(unittest.TestCase):
     def test_generated_tv3_params_match_firmware_definitions(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = Path("config/vehicles/tv3_v1.yaml")
+        vehicle = Path("config/vehicles/tv3_v1.json")
 
         defined_params = set(
             re.findall(r"PARAM_DEFINE_(?:INT32|FLOAT)\((RK_[A-Z0-9_]+),", Path("src/modules/flight_modes/tv3_params.c").read_text())
@@ -58,7 +58,7 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("RK_IGN_TO_MS", generated_params)
             self.assertIn("RK_GD_TAKE_ALT", generated_params)
             self.assertIn("RK_GD_WP1_N", generated_params)
-            self.assertIn("RK_GD_ASCENT_MODE", generated_params)
+            self.assertIn("RK_GD_ASC_MODE", generated_params)
             self.assertIn("RK_GD_WP2_HOLD_S", generated_params)
             self.assertIn("RK_GD_TWR_MIN", generated_params)
             self.assertIn("RK_ABORT_GCS", generated_params)
@@ -72,7 +72,7 @@ class VehicleAssetTests(unittest.TestCase):
 
     def test_generate_vehicle_assets(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = Path("config/vehicles/tv3_v1.yaml")
+        vehicle = Path("config/vehicles/tv3_v1.json")
 
         with TemporaryDirectory() as tmp:
             output = Path(tmp) / "generated"
@@ -86,7 +86,7 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("RK_GD_MIN_IMP_NS", params)
             self.assertIn("RK_LC_ADC_INST\t1", params)
             self.assertIn("RK_LC_NEG_CH\t1", params)
-            self.assertIn("RK_LC_MODE\t1", params)
+            self.assertIn("RK_LC_MODE\t0", params)
             self.assertIn("RK_LC_KG_SC\t0.0", params)
             self.assertIn("RK_LC_RATE_HZ\t10", params)
 
@@ -105,47 +105,38 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("vehicle_local_position_groundtruth 50", logger_topics)
             self.assertIn("vehicle_torque_setpoint 50", logger_topics)
             self.assertIn("tv3_status 20", logger_topics)
-            self.assertIn("tv3_thrust 20", logger_topics)
+            self.assertIn("tv3_thrust 50", logger_topics)
             self.assertTrue((output / "runtime" / "fs" / "microsd" / "etc" / "logging" / "logger_topics.txt").exists())
             self.assertTrue((output / "runtime" / "fs" / "microsd" / "tv3" / "motors" / "catalog.csv").exists())
-            motor_curve = (
-                output
-                / "runtime"
-                / "fs"
-                / "microsd"
-                / "tv3"
-                / "motors"
-                / "preliminary-tv3_v1-engine_0"
-                / "curve.csv"
-            ).read_text()
-            self.assertIn("250.0", motor_curve)
-            self.assertTrue(
-                (
-                    output
-                    / "runtime"
-                    / "fs"
-                    / "microsd"
-                    / "tv3"
-                    / "motors"
-                    / "preliminary-tv3_v1-engine_0"
-                    / "curve.csv"
-                ).exists()
+            motor_curve_path = (
+                output / "runtime" / "fs" / "microsd" / "tv3" / "motors" / "aerotech-g12" / "curve.csv"
             )
+            motor_curve = motor_curve_path.read_text()
+            self.assertIn("31.001", motor_curve)
+            self.assertTrue(motor_curve_path.exists())
 
             self.assertFalse((output / "gazebo").exists())
 
     def test_generate_lander_manifest_assets(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = Path("config/vehicles/tv3_lander_v1.yaml")
+        vehicle = Path("config/vehicles/tv3_lander_v1.json")
 
         with TemporaryDirectory() as tmp:
             output = Path(tmp) / "generated"
             module.generate_assets(vehicle, output)
 
             params = generated_params_path(output, "tv3_lander_v1").read_text()
+            param_values = generated_param_values(output, "tv3_lander_v1")
             self.assertIn("CA_RK_GRP_CNT\t3", params)
             self.assertIn("RK_ENG_COUNT\t3", params)
-            self.assertIn("RK_ENG2_MOT\t2", params)
+            self.assertEqual("1", param_values["RK_MOT_IDX"])
+            self.assertEqual("1", param_values["RK_ENG0_MOT"])
+            self.assertEqual("1", param_values["RK_ENG1_MOT"])
+            self.assertEqual("1", param_values["RK_ENG2_MOT"])
+            self.assertEqual("1", param_values["RK_ENG3_MOT"])
+            self.assertAlmostEqual(92.64, float(param_values["CA_RK_REF_THR"]), places=1)
+            self.assertAlmostEqual(16.965, float(param_values["CA_RK_MIN_THR"]), places=2)
+            self.assertAlmostEqual(33.93, float(param_values["CA_RK_FAL_THR"]), places=1)
             self.assertIn("RK_SPLAY_MAX_DEG\t35.0", params)
             self.assertIn("RK_GD_ENABLE\t1", params)
             self.assertIn("RK_GD_LAND_TWR\t1.15", params)
@@ -164,8 +155,8 @@ class VehicleAssetTests(unittest.TestCase):
 
     def test_flight_profile_overlay_generates_guidance_params(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = Path("config/vehicles/tv3_lander_v1.yaml")
-        profile = Path("config/flight_profiles/lander_hover_window.yaml")
+        vehicle = Path("config/vehicles/tv3_lander_v1.json")
+        profile = Path("config/flight_profiles/lander_hover_window.json")
 
         with TemporaryDirectory() as tmp:
             output = Path(tmp) / "generated"
@@ -179,31 +170,31 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertEqual("3.0", params["RK_GD_ACC_RAD"])
             self.assertEqual("0.0", params["RK_GD_WP1_N"])
             self.assertEqual("-8.0", params["RK_GD_WP1_D"])
-            self.assertEqual("1", params["RK_GD_ASCENT_MODE"])
-            self.assertEqual("1", params["RK_GD_APOGEE_MODE"])
+            self.assertEqual("1", params["RK_GD_ASC_MODE"])
+            self.assertEqual("1", params["RK_GD_APX_MODE"])
             self.assertEqual("0", params["RK_GD_LAND_MODE"])
             self.assertEqual("1", params["RK_GD_WP2_MODE"])
             self.assertEqual("3.0", params["RK_GD_WP2_HOLD_S"])
 
             runtime_extras = (output / "runtime" / "etc" / "extras.txt").read_text()
             self.assertIn("tv3_guidance start", runtime_extras)
-            active_profile = (output / "runtime" / "fs" / "microsd" / "tv3" / "flight_profiles" / "active.yaml").read_text()
-            self.assertIn("name: lander_hover_window", active_profile)
-            self.assertIn("type: hover_window", active_profile)
-            self.assertTrue((output / "runtime" / "etc" / "flight_profiles" / "lander_hover_window.yaml").exists())
+            active_profile = (output / "runtime" / "fs" / "microsd" / "tv3" / "flight_profiles" / "active.json").read_text()
+            self.assertIn('"name": "lander_hover_window"', active_profile)
+            self.assertIn('"type": "hover_window"', active_profile)
+            self.assertTrue((output / "runtime" / "etc" / "flight_profiles" / "lander_hover_window.json").exists())
 
     def test_guidance_mode_params_from_waypoint_track_profile(self) -> None:
         module = load_module(Path("tools/generate_vehicle_assets.py"))
-        vehicle = Path("config/vehicles/tv3_lander_v1.yaml")
-        profile = Path("config/flight_profiles/lander_waypoint_track.yaml")
+        vehicle = Path("config/vehicles/tv3_lander_v1.json")
+        profile = Path("config/flight_profiles/lander_waypoint_track.json")
 
         with TemporaryDirectory() as tmp:
             output = Path(tmp) / "generated"
             module.generate_assets(vehicle, output, profile)
 
             params = generated_param_values(output, "tv3_lander_v1")
-            self.assertEqual("0", params["RK_GD_ASCENT_MODE"])
-            self.assertEqual("0", params["RK_GD_APOGEE_MODE"])
+            self.assertEqual("0", params["RK_GD_ASC_MODE"])
+            self.assertEqual("0", params["RK_GD_APX_MODE"])
             self.assertEqual("0", params["RK_GD_LAND_MODE"])
             self.assertEqual("0", params["RK_GD_WP1_MODE"])
             self.assertEqual("0", params["RK_GD_WP2_MODE"])
@@ -218,13 +209,13 @@ class VehicleAssetTests(unittest.TestCase):
             module.guidance_mode_value(module.LANDING_MODES, "hover", "approach")
 
     def test_vehicle_intake_schema_exists(self) -> None:
-        schema = Path("config/schemas/vehicle_intake_schema.yaml").read_text()
+        schema = Path("config/schemas/vehicle_intake_schema.json").read_text()
         self.assertIn("data_status_values", schema)
         self.assertIn("param_parity", schema)
         self.assertIn("unit_vec3", schema)
 
     def test_flight_profile_schema_and_examples_exist(self) -> None:
-        schema = Path("config/schemas/flight_profile_schema.yaml").read_text()
+        schema = Path("config/schemas/flight_profile_schema.json").read_text()
         self.assertIn("tv3_flight_profile_schema_v1", schema)
         self.assertIn("ascent_mode", schema)
         self.assertIn("wp2_mode", schema)
@@ -240,7 +231,7 @@ class VehicleAssetTests(unittest.TestCase):
             "lander_impossible_guidance",
         ]
         for name in profiles:
-            profile = yaml.safe_load(Path(f"config/flight_profiles/{name}.yaml").read_text())
+            profile = json.loads(Path(f"config/flight_profiles/{name}.json").read_text())
             self.assertEqual("tv3_flight_profile_v1", profile["schema"])
             self.assertEqual(name, profile["name"])
             self.assertIn(profile["vehicle"], {"tv3_v1", "tv3_lander_v1"})
@@ -249,13 +240,14 @@ class VehicleAssetTests(unittest.TestCase):
 
     def test_allocator_reachability_for_lander(self) -> None:
         allocator = load_module(Path("tools/tv3_control_allocator.py"))
-        vehicle = allocator.load_manifest(Path("config/vehicles/tv3_lander_v1.yaml"))
+        vehicle = allocator.load_manifest(Path("config/vehicles/tv3_lander_v1.json"))
         engines = allocator.engines_from_vehicle(vehicle)
 
-        reachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 620.0)
+        hover_thrust_n = allocator.vehicle_full_thrust_n(vehicle)
+        reachable = allocator.allocate(engines, (0.0, 0.0, 0.0), hover_thrust_n)
         self.assertTrue(reachable.reachable, reachable)
 
-        unreachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 100.0)
+        unreachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 40.0)
         self.assertFalse(unreachable.reachable)
         self.assertEqual(allocator.REASON_THRUST_ENVELOPE, unreachable.reason)
 
@@ -276,7 +268,7 @@ class VehicleAssetTests(unittest.TestCase):
         self.assertNotIn("tv3_guidance start", post)
 
         defaults = Path("overlay/ROMFS/init.d-posix/rc.tv3_defaults").read_text()
-        self.assertIn("RK_GD_ASCENT_MODE", defaults)
+        self.assertIn("RK_GD_ASC_MODE", defaults)
         self.assertIn("RK_GD_WP2_HOLD_S", defaults)
 
         prepare = Path("scripts/prepare_px4_tree.sh").read_text()

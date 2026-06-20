@@ -2,15 +2,50 @@
 
 The active simulator path is PX4 Simulation-In-Hardware (SIH) with the custom `tv3_sih` module. Hawkeye is a viewer only; the physics source of truth is `tv3_sih`.
 
-The retired Gazebo workflow and source files are archived under `deprecated/sim/gazebo/`. Large local payloads and old run logs live outside this checkout under `../deprecated-sim/gazebo/`.
+The retired Gazebo workflow is no longer part of the active repo. Local copies may live under gitignored `deprecated/sim/gazebo/` or outside this checkout under `../deprecated-sim/gazebo/`.
+
+## Prerequisites (macOS)
+
+- Xcode Command Line Tools (`xcode-select --install`)
+- Homebrew with `cmake`, `git`, and `python3`
+- `brew install qt@5` (PX4 SITL links against Qt 5)
+- Optional visualization: `brew tap px4/px4 && brew install px4/px4/hawkeye`
+- Disk space for `../vendor/px4` and `../.work/px4-tv3` (cloned and prepared by the bootstrap scripts)
+
+Vehicle manifests and flight profiles are JSON under `config/vehicles/*.json` and `config/flight_profiles/*.json`.
+
+## First-Time Setup
+
+```bash
+./scripts/check_barebones.sh      # host tests + generate bare-bones assets
+./scripts/bootstrap_px4.sh        # clone PX4 v1.16.1 into ../vendor/px4
+./scripts/prepare_px4_tree.sh     # patched worktree + ROMFS overlays
+./scripts/build_sih.sh            # PX4 SITL build with tv3_sih
+```
+
+## Daily Workflow
+
+```bash
+# Default lander hover-window gate:
+./scripts/run_sitl_sih.sh
+
+# Automated Phase 1 gate (headless, archives ULog, runs review):
+./scripts/check_hover_window.sh
+
+# Plot the newest archived run:
+./scripts/setup_viz_env.sh        # once
+./scripts/plot_ulog.sh --latest
+```
+
+Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_v1.json`. Load a scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/single_engine_ascent.json`.
 
 ## Default Gate
 
 The first required scenario gate is:
 
 ```bash
-TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml \
-TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml \
+TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json \
+TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json \
 ./scripts/run_sitl_sih.sh
 ```
 
@@ -36,8 +71,8 @@ The launcher sets:
 - `PX4_SIMULATOR=sihsim`
 - `PX4_SIM_MODEL=tv3_lander`
 - `PX4_SYS_AUTOSTART=11002`
-- `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml`
-- `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml`
+- `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json`
+- `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json`
 
 It also syncs the TV3 logger profile into the PX4 rootfs, starts the profile command runner by default, and archives new ULogs into `logs/sim/YYYY-MM-DD/<run-id>/` on exit.
 
@@ -57,8 +92,8 @@ starts streaming the SIH viewer feed:
 
 ```bash
 # Terminal 2
-TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.yaml \
-TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.yaml \
+TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json \
+TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json \
 TV3_LOG_RUN_ID=manual-hawkeye-visual \
 ./scripts/run_sitl_sih.sh
 ```
@@ -77,7 +112,7 @@ pkill -f 'px4_sitl_default.*/bin/px4|run_sitl_sih.sh' || true
 
 ## Profile Commands
 
-`scripts/run_profile_commands.py` reads the active flight profile and sends the command timeline over MAVLink. For `lander_hover_window.yaml`, it arms at `t=0` and sends TV3 launch command `31010` with `param1=1` at `t=1`.
+`scripts/run_profile_commands.py` reads the active flight profile and sends the command timeline over MAVLink. For `lander_hover_window.json`, it arms at `t=0` and sends TV3 launch command `31010` with `param1=1` at `t=1`.
 
 Default MAVLink endpoint:
 
@@ -128,4 +163,22 @@ SITL ULogs are archived under:
 logs/sim/YYYY-MM-DD/<run-id>/
 ```
 
-Each archive includes copied `.ulg` files, `manifest.txt`, `logger_topics.txt` when available, the active `vehicle.yaml`, and the active `flight_profile.yaml`.
+Each archive includes copied `.ulg` files, `manifest.txt`, `logger_topics.txt` when available, the active `vehicle.json`, and the active `flight_profile.json`.
+
+## Ports And Endpoints
+
+| Service | Default endpoint | Notes |
+| --- | --- | --- |
+| Profile command runner | `udpin:0.0.0.0:14540` | Override with `TV3_MAVLINK_URL` |
+| QGroundControl (SITL) | UDP `18570` | Normal PX4 GCS link |
+| Hawkeye viewer | UDP `19410` | Visualization only; not physics truth |
+
+## Troubleshooting
+
+- **Stale PX4 or Hawkeye process**: run the `pkill` commands in the visual-run section above before restarting.
+- **Hawkeye not found**: set `HAWKEYE_CMD` to the executable, install via Homebrew, or place `Hawkeye.app` in `/Applications`.
+- **Profile commands do not arm/launch**: confirm QGC is not holding the serial/UDP link exclusively; check `TV3_RUN_PROFILE_COMMANDS` is not `0`.
+- **Missing ULog topics**: run `./scripts/sync_sitl_logger_topics.sh` or start a new run so `run_sitl_sih.sh` copies the generated logger profile before boot.
+- **Build fails after PX4 update**: rerun `./scripts/prepare_px4_tree.sh` to reapply patches, then `./scripts/build_sih.sh`.
+
+See also [docs/data_visualization.md](data_visualization.md) for ULog plotting and [docs/completion_roadmap.md](completion_roadmap.md) for phase gates.

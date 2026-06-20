@@ -48,19 +48,19 @@ class VehicleManifestValidationTests(unittest.TestCase):
                 self.assertTrue(all(check.passed for check in parity_checks), parity_checks)
 
     def test_unit_vector_validation_rejects_bad_axis(self) -> None:
-        manifest = self.validator.load_yaml(Path("config/vehicles/tv3_v1.yaml"))
+        manifest = self.validator.load_json(Path("config/vehicles/tv3_v1.json"))
         manifest["propulsion"]["engines"][0]["thrust_axis"] = [2.0, 0.0, 0.0]
-        schema = self.validator.load_yaml(self.validator.DEFAULT_SCHEMA)
-        report = self.validator.validate_manifest(manifest, Path("bad.yaml"), schema)
+        schema = self.validator.load_json(self.validator.DEFAULT_SCHEMA)
+        report = self.validator.validate_manifest(manifest, Path("bad.json"), schema)
         failed = [check.name for check in report.checks if not check.passed]
         self.assertIn("engine_0.thrust_axis", failed)
 
     def test_generator_rejects_invalid_manifest(self) -> None:
         generator = load_module(Path("tools/generate_vehicle_assets.py"))
-        manifest = generator.load_vehicle(Path("config/vehicles/tv3_v1.yaml"))
+        manifest = generator.load_vehicle(Path("config/vehicles/tv3_v1.json"))
         manifest.pop("data_status")
         with self.assertRaises(ValueError):
-            generator.validate_vehicle(manifest, Path("config/vehicles/tv3_v1.yaml"))
+            generator.validate_vehicle(manifest, Path("config/vehicles/tv3_v1.json"))
 
 
 if __name__ == "__main__":

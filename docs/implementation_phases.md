@@ -52,7 +52,7 @@ Phase 3: Guidance re-entry
 Phase 4: PX4 allocator and SITL fidelity
 
 - Refresh the PX4 patch against the selected PX4 tag.
-- Run SIH asset generation from the vehicle YAML.
+- Run SIH asset generation from the vehicle JSON manifest.
 - Verify TVC actuator outputs under expected and measured thrust changes.
 
 Phase 5: Hardware readiness

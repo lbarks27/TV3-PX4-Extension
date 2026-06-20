@@ -38,7 +38,7 @@ def load_adc_csv(path: Path) -> list[tuple[float, int | None]]:
 def run_trace(
     fixture_name: str,
     *,
-    vehicle: str = "config/vehicles/tv3_v1.yaml",
+    vehicle: str = "config/vehicles/tv3_v1.json",
     launch_at_s: float = 0.0,
     source: int | None = None,
 ):
@@ -69,7 +69,7 @@ def run_trace(
 
 class PropulsionSemanticsTests(unittest.TestCase):
     def test_reference_and_adc_sources_share_ignition_confirmation(self) -> None:
-        manifest = propulsion.load_manifest(REPO_ROOT / "config/vehicles/tv3_v1.yaml")
+        manifest = propulsion.load_manifest(REPO_ROOT / "config/vehicles/tv3_v1.json")
         thrust_curve = [0.0, 0.0, 20.0, 40.0, 50.0, 50.0]
 
         def run_with_source(source: int) -> list[bool]:
@@ -128,7 +128,7 @@ class PropulsionSemanticsTests(unittest.TestCase):
     def test_lander_three_engine_sequence_confirms_all_engines(self) -> None:
         timeline = run_trace(
             "lander_three_engine_sequence.csv",
-            vehicle="config/vehicles/tv3_lander_v1.yaml",
+            vehicle="config/vehicles/tv3_lander_v1.json",
         )
         summary = replay.summarize_timeline(timeline)
         self.assertTrue(summary["saw_boost"])

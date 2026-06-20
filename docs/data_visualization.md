@@ -66,7 +66,7 @@ SITL first writes PX4 ULogs to the local PX4 rootfs:
 logs/sim/YYYY-MM-DD/<run-id>/
 ```
 
-Each archive directory includes copied `.ulg` files plus `manifest.txt`; SITL archives also include `logger_topics.txt`, `flight_profile.yaml`, and `vehicle.yaml` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
+Each archive directory includes copied `.ulg` files plus `manifest.txt`; SITL archives also include `logger_topics.txt`, `flight_profile.json`, and `vehicle.json` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
 
 Use a stable run ID when you want a predictable folder name:
 
@@ -78,7 +78,7 @@ Archive flight-hardware or ground-test logs copied from QGroundControl, an SD ca
 
 ```bash
 ./scripts/archive_px4_logs.sh --kind flight --source /path/to/log.ulg --run-id flight-001
-./scripts/archive_px4_logs.sh --kind ground --source /path/to/log-folder --run-id load-cell-bench-001
+./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id load-cell-bench-001
 ```
 
 ## Plot a SITL Run

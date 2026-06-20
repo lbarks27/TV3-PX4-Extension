@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import yaml
+import json
 
 
 def load_module(path: Path):
@@ -20,7 +20,7 @@ def load_module(path: Path):
 
 class ReviewFlightProfileTests(unittest.TestCase):
     def test_hover_window_profile_declares_review_criteria(self) -> None:
-        profile = yaml.safe_load(Path("config/flight_profiles/lander_hover_window.yaml").read_text())
+        profile = json.loads(Path("config/flight_profiles/lander_hover_window.json").read_text())
         review = profile["review"]
         self.assertEqual(3.0, review["min_hover_s"])
         self.assertIn("tv3_guidance_status", review["required_topics"])

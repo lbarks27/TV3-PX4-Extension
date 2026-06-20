@@ -11,7 +11,7 @@ controls, and recovery procedures.
 
 ## Current Hardware Target
 
-The default hardware vehicle is `config/vehicles/tv3_v1.yaml`:
+The default hardware vehicle is `config/vehicles/tv3_v1.json`:
 
 - Autopilot: Cube Orange Plus
 - Carrier: mini carrier
@@ -35,6 +35,13 @@ make -C ../.work/px4-tv3 list_config_targets | rg 'cubeorangeplus|cubeorange'
 
 ## Build And Flash Firmware
 
+Prerequisite: install the PX4 ARM toolchain (`arm-none-eabi-gcc`). On macOS with Homebrew:
+
+```bash
+brew tap px4/px4
+brew install px4/px4/arm-gcc
+```
+
 Run the hardware build from the repo root:
 
 ```bash
@@ -44,7 +51,7 @@ Run the hardware build from the repo root:
 That script:
 
 - prepares `../.work/px4-tv3`
-- builds PX4 with `EXTERNAL_MODULES_LOCATION` pointed at this repo
+- builds PX4 with `EXTERNAL_MODULES_LOCATION` pointed at the no-space symlink `../.work/tv3-px4-extension` (required because this checkout path contains spaces)
 - generates TV3 runtime assets under `build/nuttx/cubepilot_cubeorangeplus_default`
 - stages the microSD payload under `../.work/cubepilot_cubeorangeplus_default_runtime`
 
@@ -52,7 +59,7 @@ Flash the Cube Orange Plus from the prepared PX4 worktree:
 
 ```bash
 make -C ../.work/px4-tv3 cubepilot_cubeorangeplus_default upload \
-	EXTERNAL_MODULES_LOCATION="$(pwd)"
+	EXTERNAL_MODULES_LOCATION="../.work/tv3-px4-extension"
 ```
 
 PX4's make flow accepts `make <target> upload` as the build-and-upload path. Use
@@ -63,20 +70,53 @@ PX4's make flow accepts `make <target> upload` as the build-and-upload path. Use
 Firmware upload is only half of this repo's hardware deployment. The flight
 controller also needs the generated runtime payload on its microSD card.
 
-After the build, copy the staged payload to the Cube's microSD card:
+### Quick path: SD card attached to this Mac
 
-```text
-../.work/cubepilot_cubeorangeplus_default_runtime/etc/*        -> /fs/microsd/etc/
-../.work/cubepilot_cubeorangeplus_default_runtime/fs/microsd/* -> /fs/microsd/
+When the Cube microSD is mounted over USB (macOS usually shows it as
+`/Volumes/NO NAME`):
+
+```bash
+./scripts/stage_microsd.sh
 ```
 
-The staged payload should include:
+Or pass the mount explicitly:
+
+```bash
+./scripts/stage_microsd.sh --mount "/Volumes/NO NAME"
+```
+
+The script:
+
+1. Validates `config/vehicles/tv3_v1.json`
+2. Generates runtime assets under `build/microsd_stage/`
+3. Copies them onto the card:
+
+```text
+build/microsd_stage/runtime/etc/*        -> <sd>/etc/
+build/microsd_stage/runtime/fs/microsd/* -> <sd>/
+```
+
+Safely eject the card, insert it into the Cube Orange Plus, and power-cycle.
+
+### Manual path: copy from a NuttX build tree
+
+After `./scripts/build_nuttx.sh cubepilot_cubeorangeplus_default`, copy from the
+staged runtime tree:
+
+```text
+../.work/cubepilot_cubeorangeplus_default_runtime/etc/*        -> <sd>/etc/
+../.work/cubepilot_cubeorangeplus_default_runtime/fs/microsd/* -> <sd>/
+```
+
+### Expected card layout
+
+On the FAT32 volume PX4 mounts as `/fs/microsd`:
 
 - `etc/config.txt`
 - `etc/extras.txt`
 - `etc/logging/logger_topics.txt`
 - `tv3/airframes/tv3_v1.params`
-- `tv3/motors/`
+- `tv3/motors/` (checked-in thrust curves: G8, G12, F10)
 
 On boot, PX4 reads `/fs/microsd/etc/config.txt` and
 `/fs/microsd/etc/extras.txt`. The TV3 `extras.txt` imports the generated
@@ -93,6 +133,93 @@ mavlink stream -d /dev/ttyACM0 -s DEBUG_VECT -r 10
 This bench hardware overlay is intentionally limited to load-cell bring-up so
 the Cube Orange Plus image stays under flash. Keep the launch/control modules
 disabled until the sensor path is verified.
+
+### Bench wiring reference (`tv3_v1`)
+
+| Interface | Manifest / PX4 | Notes |
+| --- | --- | --- |
+| TVC pitch servo | PWM MAIN1, function 201 | `PWM_MAIN_FUNC1` |
+| TVC yaw servo | PWM MAIN2, function 202 | `PWM_MAIN_FUNC2` |
+| Load cell ADC | I2C2, address `0x48` | `ads1115 start -X -b 2 -a 0x48` |
+| Load cell channels | A0/A1 differential | `RK_LC_CH=0`, `RK_LC_NEG_CH=1` |
+| GPS | Here4 RTK | Standard PX4 GPS params |
+| Telemetry | RFD900 | Configure TELEM port in QGC |
+
+## Phase 2 Bench Bring-Up
+
+Phase 2 requires both **TV3 firmware on the Cube** and a **staged microSD card**.
+Stock PX4 without the TV3 extension will not expose `RK_*` parameters or
+`tv3_load_cell` modules.
+
+Recommended order:
+
+1. Flash TV3 firmware (`./scripts/build_nuttx.sh` + `make upload`)
+2. Stage the microSD card (`./scripts/stage_microsd.sh`)
+3. Power-cycle the Cube with the card inserted
+4. Connect over USB; confirm `RK_LC_*` parameters appear in QGC
+5. Calibrate the load cell (below)
+6. Close QGC and capture measurements into the manifest
+
+### Load-cell calibration on the bench
+
+From QGC MAVLink Console (or the PX4 shell):
+
+```sh
+tv3_load_cell_telemetry status
+tv3_load_cell_telemetry tare
+# place a known mass on the load cell
+tv3_load_cell_telemetry calibrate 2.000
+param save
+```
+
+`tare` stores the no-load ADC count in `RK_LC_TARE`. `calibrate` stores
+`RK_LC_KG_SC` as `known_mass_kg / (current_raw - tare)`. The flight stack uses
+`RK_LC_SCALE` (N per count) for thrust confirmation; the capture script derives
+that from `RK_LC_KG_SC` when promoting the manifest.
+
+### Capture bench data into the vehicle manifest
+
+**Close QGroundControl** before running capture (USB serial is exclusive).
+
+```bash
+./scripts/complete_phase2_bench.sh --body-mass-kg <weighed_body_kg>
+```
+
+Optional overrides:
+
+```bash
+TV3_MAVLINK_CONNECT=/dev/cu.usbmodem01 \
+TV3_BENCH_SAMPLE_S=30 \
+./scripts/complete_phase2_bench.sh \
+  --body-mass-kg 1.02 \
+  --tvc-max-deg 4.8 \
+  --tvc-slew-dps 210
+```
+
+The script:
+
+- Downloads `RK_*` and PWM parameters over MAVLink
+- Samples `lc_data` debug vectors for noise statistics
+- Writes `logs/ground/bench_capture_*.json`
+- Updates `config/vehicles/tv3_v1.json` provenance fields
+- Re-validates the manifest and regenerates assets
+
+Re-stage the microSD card after manifest promotion so the card matches the
+checked-in vehicle JSON:
+
+```bash
+./scripts/stage_microsd.sh
+```
+
+Bench capture JSON is written automatically under `logs/ground/bench_capture_*.json` by
+`complete_phase2_bench.sh`. Reference those files in completion status evidence. When you
+also have ground-test `.ulg` files from QGC or the microSD card, archive them with:
+
+```bash
+./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id phase2-bench-001
+```
+
+See `docs/templates/bench_calibration_report.md` for the formal sign-off template.
 
 ## Connect From QGroundControl
 
@@ -189,7 +316,7 @@ mavlink stream -d /dev/ttyS0 -s DEBUG_VECT -r 10
 
 ## Configure And Verify Parameters
 
-Treat `config/vehicles/tv3_v1.yaml` as the source of truth for generated flight
+Treat `config/vehicles/tv3_v1.json` as the source of truth for generated flight
 parameters. Do not hand-edit a different one-off parameter set in QGC and then
 let it drift from the manifest.
 
@@ -224,8 +351,8 @@ Before field use, verify at least:
 
 After parameter edits in QGC, save the parameters and keep the saved file with
 the test record. If a field value becomes part of the baseline vehicle, update
-the YAML manifest and regenerate the runtime payload rather than relying on the
-QGC-only copy.
+the JSON manifest and regenerate the runtime payload (`./scripts/stage_microsd.sh`)
+rather than relying on the QGC-only copy.
 
 ## Bench And Ground-Test Gates
 
@@ -250,10 +377,11 @@ Before launch-day use, confirm:
 - abort and reset commands are verified from QGC
 - ULog captures the TV3 topics needed for review
 
-Archive ground-test logs into the repo:
+Archive ground-test `.ulg` files into the repo (bench capture JSON already lives under
+`logs/ground/`):
 
 ```bash
-./scripts/archive_px4_logs.sh --kind ground --source /path/to/log-folder --run-id bench-001
+./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id bench-001
 ```
 
 ## Launch-Day Software Flow

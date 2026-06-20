@@ -1,2 +1,6 @@
+rerun-sdk>=0.22
+pyvista>=0.44
 matplotlib>=3.8
 pyulog>=1.2.2
+numpy>=1.26
+vtk>=9.3

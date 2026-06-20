@@ -146,9 +146,9 @@ public:
 			PX4_WARN("%s", reason);
 		}
 
-		PRINT_MODULE_DESCRIPTION("Deterministic TV3 tv3 Simulation-In-Hardware dynamics. "
-		"6DOF rigid-body plant driven by per-engine gimbaled thrust vectors (using CA_RK geometry), "
-		"variable mass, COM migration, and diagonal inertia from manifests.");
+		PRINT_MODULE_DESCRIPTION("Deterministic TV3 SIH dynamics. "
+		"Simplified 6DOF rigid-body plant driven by per-engine gimbaled thrust vectors (CA_RK geometry). "
+		"Variable mass and COM migration; fixed diagonal inertia. Pure forward model (no guidance scaling or inverse allocation).");
 		PRINT_MODULE_USAGE_NAME("tv3_sih", "simulation");
 		PRINT_MODULE_USAGE_COMMAND("start");
 		return 0;
@@ -209,6 +209,7 @@ private:
 		_engine_command_sub.update(&_engine_command);
 
 		const hrt_abstime now = hrt_absolute_time();
+		// dt from hrt (manipulated by SIH clock in run()). Clamped for safety. Integration uses this dt.
 		const float dt = math::constrain((now - _last_update) * 1e-6f, 0.001f, 0.05f);
 		_last_update = now;
 
@@ -220,7 +221,6 @@ private:
 	{
 		_body_mass_kg = get_param_float("RK_BODY_MASS_KG", get_param_float("CA_RK_BODY_M", 1.0f));
 		_body_com_x_m = get_param_float("RK_BODY_COM_X_M", get_param_float("CA_RK_BODY_CMX", 0.0f));
-		_motor_com_x_m = get_param_float("RK_MOTOR_COM_X_M", get_param_float("CA_RK_MOT_CMX", 0.0f));
 		_rail_length_m = get_param_float("RK_RAIL_LEN_M", 0.0f);
 
 		_home_lat_deg = get_param_float("SIH_LOC_LAT0", 47.397742f);
@@ -258,7 +258,10 @@ private:
 			_groups[i].yaw_max_rad = math::radians(getg("YMAX", 5.f));
 		}
 
-		// Inertia (diagonal). Allow explicit RK_I** override; otherwise pick sensible default by engine count.
+		// Inertia (diagonal only, body frame). Loaded from RK_I** (populated by manifest via
+		// generate_vehicle_assets.py from physical_model). Inertia is held constant even as motor
+		// mass depletes and COM migrates (see vehicle_mass_kg / current_com_body). This is a
+		// deliberate simplification; full variable-inertia about moving COM is not modeled.
 		float ixx = get_param_float("RK_IXX", (_num_groups >= 3 ? 0.43f : 0.144f));
 		float iyy = get_param_float("RK_IYY", (_num_groups >= 3 ? 0.43f : 0.144f));
 		float izz = get_param_float("RK_IZZ", (_num_groups >= 3 ? 0.05f : 0.010f));
@@ -315,9 +318,10 @@ private:
 		const int command_count = math::constrain(static_cast<int>(_engine_command.engine_count), 0,
 							  static_cast<int>(tv3_engine_command_s::MAX_ENGINES));
 
-		// Gimbal angles (primary roll + secondary splay/yaw) come from tv3_engine_command.
-		// The plant is a pure forward dynamics model: force and torque are computed from
-		// current engine thrusts (from motor model) and the instantaneous (rate-limited) gimbal angles.
+		// Gimbal angles come from tv3_engine_command (primary + secondary).
+		// For collective-splay vehicles the secondary field is allocator_differential +
+		// common_splay bias (allocator still contributes to attitude on the shared actuator).
+		// The plant is a pure forward model using the total commanded angles.
 		for (int i = 0; i < command_count && i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = _engine_command.commanded_pitch_deg[i] * kDegToRad;
 			_cmd_yaw_rad[i] = _engine_command.commanded_yaw_deg[i] * kDegToRad;
@@ -328,8 +332,9 @@ private:
 			_cmd_yaw_rad[i] = 0.f;
 		}
 
-		// Basic first-order actuator / rate limit for gimbals *in the plant* (commands not applied instantly).
-		// Respects RK_TVC_SLEW_DPS from the manifest (250 dps v1, ~220 lander).
+		// Basic slew-rate limiting for gimbals inside the plant (simple actuator model).
+		// No backlash, hysteresis, or servo dynamics modeled (manifests declare backlash fields which are 0 today).
+		// Respects RK_TVC_SLEW_DPS. More complete actuator modeling is out of scope for current SIH use.
 		{
 			float slew_dps = get_param_float("RK_TVC_SLEW_DPS", 220.f);
 			float max_step = math::max(slew_dps * kDegToRad * math::max(dt, 0.001f), 0.f);
@@ -341,7 +346,7 @@ private:
 			}
 		}
 
-		// === New wrench-driven 6DOF plant (addresses puppet logic, mean-only, no r×F, no inertia) ===
+		// Wrench-driven 6DOF plant. Pure forward model using engine thrusts + gimbal angles.
 		const float mass = vehicle_mass_kg();
 		const Vector3f com_b = current_com_body();
 
@@ -350,17 +355,7 @@ private:
 
 		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
 		for (int i = 0; i < neng; ++i) {
-			float thr = 0.f;
-			if (i < tv3_engine_state_s::MAX_ENGINES) {
-				thr = _engine_state.filtered_thrust_n[i];
-				if (!PX4_ISFINITE(thr) || thr <= 0.f) {
-					thr = _engine_state.measured_thrust_n[i];
-				}
-				if (!PX4_ISFINITE(thr) || thr <= 0.f) {
-					thr = _engine_state.expected_thrust_n[i];
-				}
-				thr = math::max(thr, 0.f);
-			}
+			const float thr = effective_thrust_n(i);
 			if (thr < 1e-3f) {
 				continue;
 			}
@@ -373,9 +368,9 @@ private:
 			engine_tau_b += r_b.cross(f_b);
 		}
 
-		// Net force and torque are produced solely by the current chamber thrusts (engine_state)
-		// deflected by the commanded (slew-limited) gimbal angles. Net axial reduction for splay-throttle
-		// vehicles is achieved by the upstream splay angle commands (see tv3_mode_manager collective logic).
+		// Net force/torque from current thrusts (engine_state) * total gimbal angles (which for
+		// splay vehicles include the common splay bias added to allocator differentials on the
+		// shared secondary actuator).
 		Vector3f force_b = engine_force_b;
 		Vector3f tau_b = engine_tau_b;
 
@@ -387,8 +382,12 @@ private:
 		const Vector3f g_world{0.f, 0.f, kGravityMps2};
 		Vector3f a_world = f_world / math::max(mass, 0.1f) + g_world;
 
-		// Rail constraint (kinematic lock + zero rates while on rail; use length + position as proxy for tv3_status.rail_exit)
+		// Rail constraint (kinematic lock). While altitude < rail_len, force zero lateral motion/vel/pos
+		// and zero body rates. Additionally, we freeze attitude integration to model a stiff rail
+		// that holds orientation until clear (prevents disturbance torques from accumulating pitch
+		// while "on rail"). No friction or compliance modeled. Matches tv3_status.rail_exit semantics.
 		const bool on_rail = (_rail_length_m > 0.f) && (-_position(2) < _rail_length_m);
+		bool skip_attitude_integration = false;
 		if (on_rail) {
 			a_world(0) = 0.f;
 			a_world(1) = 0.f;
@@ -398,24 +397,24 @@ private:
 			_position(1) = 0.f;
 			_omega_b(0) = 0.f;
 			_omega_b(1) = 0.f;
-			_omega_b(2) = 0.f; // no roll/yaw on rail
+			_omega_b(2) = 0.f;
+			skip_attitude_integration = true;  // hold orientation
 		}
 
 		_velocity += a_world * dt;
 		_position += _velocity * dt;
 
-		// Ground (simple non-penetration + velocity damping + light lateral friction for lander)
+		// Ground (minimal non-penetration model for SITL deck/landing).
+		// Hard clamp + empirical velocity and rate damping. No stiffness, restitution coefficient,
+		// or contact force feedback to IMU. Sufficient for current hover/land gates but not high-fidelity.
 		if (_position(2) > 0.f) {
 			_position(2) = 0.f;
-			// vertical
 			if (_velocity(2) > 0.f) {
-				_velocity(2) *= 0.15f; // energy loss on impact
+				_velocity(2) *= 0.15f; // crude energy loss
 				_velocity(2) = 0.f;
 			}
-			// light ground friction / damping on horizontal
 			_velocity(0) *= 0.6f;
 			_velocity(1) *= 0.6f;
-			// damp rates (prevents spinning on "deck")
 			_omega_b *= 0.4f;
 		}
 
@@ -438,14 +437,19 @@ private:
 				       _inertia_inv(1) * tau_net(1),
 				       _inertia_inv(2) * tau_net(2)};
 
-		_omega_b += alpha_b * dt;
+		if (!skip_attitude_integration) {
+			_omega_b += alpha_b * dt;
 
-		// Attitude integration (quat)
-		// \dot q = 1/2 q \otimes [0, omega]
-		Quatf omega_q(0.f, _omega_b(0), _omega_b(1), _omega_b(2));
-		Quatf qdot = _att_q * omega_q * 0.5f;
-		_att_q = _att_q + (qdot * dt);
-		_att_q.normalize();
+			// Attitude integration (first-order quat Euler + normalize). Sufficient at 400 Hz sim step.
+			// \dot q = 1/2 q \otimes [0, omega]
+			Quatf omega_q(0.f, _omega_b(0), _omega_b(1), _omega_b(2));
+			Quatf qdot = _att_q * omega_q * 0.5f;
+			_att_q = _att_q + (qdot * dt);
+			_att_q.normalize();
+		} else {
+			// While on rail, hold attitude fixed (rail counters torques); omega already zeroed.
+			_omega_b.zero();
+		}
 
 		// Sync legacy state for publish / old consumers
 		_angular_velocity = _omega_b;
@@ -540,7 +544,6 @@ private:
 	uint64_t _current_simulation_time_us{0};
 	float _body_mass_kg{1.f};
 	float _body_com_x_m{0.f};
-	float _motor_com_x_m{0.f};
 	float _rail_length_m{0.f};
 	float _home_lat_deg{47.397742f};
 	float _home_lon_deg{8.545594f};
@@ -557,8 +560,9 @@ private:
 	Quatf _att_q{AxisAnglef(Vector3f{0.f, 1.f, 0.f}, M_PI_F * 0.5f)};
 	Vector3f _omega_b{};   // body rates
 
-	// Diagonal inertia (body frame). Defaults chosen from manifest physical_model for the vehicles.
-	Vector3f _inertia_diag{0.144f, 0.144f, 0.010f}; // tv3_v1 baseline; lander ~0.43/0.43/0.05
+	// Diagonal inertia (body frame). Fixed at parameter load (see update_parameters).
+	// Manifest provides initial values; not updated for propellant depletion.
+	Vector3f _inertia_diag{0.144f, 0.144f, 0.010f};
 	Vector3f _inertia_inv{1.f/0.144f, 1.f/0.144f, 1.f/0.010f};
 
 	// Geometry loaded from CA_RK_* params (matches allocator effectiveness model)
@@ -573,6 +577,24 @@ private:
 	// Actually applied (rate-limited) angles used for thrust direction this tick. Provides basic actuator dynamics in plant.
 	float _applied_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
 	float _applied_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
+
+	// Robust thrust selection used by SIH plant and other consumers. Prefers filtered,
+	// falls back to measured then expected. Duplicated in mode_manager etc; kept local
+	// to avoid cross-module dependency for the simple plant.
+	float effective_thrust_n(int i) const
+	{
+		if (i < 0 || i >= tv3_engine_state_s::MAX_ENGINES) {
+			return 0.f;
+		}
+		float thr = _engine_state.filtered_thrust_n[i];
+		if (!PX4_ISFINITE(thr) || thr <= 0.f) {
+			thr = _engine_state.measured_thrust_n[i];
+		}
+		if (!PX4_ISFINITE(thr) || thr <= 0.f) {
+			thr = _engine_state.expected_thrust_n[i];
+		}
+		return math::max(thr, 0.f);
+	}
 
 	Vector3f engine_thrust_dir_body_angles(int i, float pitch_rad, float yaw_rad) const
 	{

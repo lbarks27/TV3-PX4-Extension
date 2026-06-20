@@ -201,9 +201,14 @@ Net thrust can only be reduced ~18% via splay alone. Demanding less than ~76 N w
 all engines active is **unreachable** — the host allocator returns
 `net thrust outside splay envelope`.
 
-Splay is published on `tv3_engine_command.commanded_splay_deg[]` but is **not yet
-driven by the PX4 allocator**, which only mixes pitch/yaw servos. Thrust magnitude
-is gated by `tv3_guidance` via `required_thrust_n` and scaled in the SIH plant.
+Splay (collective secondary-axis deflection for thrust modulation) is applied in
+`tv3_mode_manager` as a **common-mode bias added to the allocator's secondary-axis
+commands**. The secondary actuator is shared (splay is not an independent DOF).
+Allocator commands provide the differential for attitude torques; splay provides
+the common component for net thrust reduction. The final `commanded_yaw_deg[]`
+(and `commanded_splay_deg[]`) therefore contain `allocator_secondary + splay_common`
+for each engine. This prevents splay from disabling attitude authority on the
+secondary mount actuator.
 
 ## Host-side reachability checker
 

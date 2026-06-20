@@ -5,15 +5,37 @@ This repo supports a PX4-first data path for detailed SITL, flight, and ground-t
 1. Generate a TV3 ULog topic profile with the runtime assets.
 2. Sync that profile into the PX4 SITL rootfs before launch.
 3. Archive the resulting `.ulg` under `logs/`.
-4. Plot the archived `.ulg` with Matplotlib.
+4. Review archived logs with the TV3 viz stack below.
 
-## Install Plotting Dependencies
+## Visualization Stack
+
+| Use case | Tool | Entry point |
+|----------|------|-------------|
+| Live SITL 3D pose | **Hawkeye** | `./scripts/run_hawkeye.sh` |
+| Interactive 3D spatial review (no timeline) | **PyVista** | `./scripts/view_vehicle_frame.sh`, `./scripts/plot_ulog_replay.sh`, `./scripts/plot_ulog_engines.sh` |
+| Timed log playback (scrubbable timeline) | **Rerun** | replay scripts with `--rerun` |
+| Static PNG export | **PyVista** | replay/vehicle scripts with `-o *.png` or `--save` |
+| Static 2D ULog timeseries review | **Matplotlib** | `./scripts/plot_ulog.sh` |
+
+Hawkeye is a live UDP viewer only (port `19410`). PyVista opens an interactive 3D window you can orbit and zoom — it shows a single snapshot in time (pick with `--time`), not a scrubber. Rerun is for full timed playback across the log. Use `-o file.png` when you need a headless snapshot for reports or CI.
+
+## Install And Validate
+
+Run once before any plotting or replay:
 
 ```bash
 ./scripts/setup_viz_env.sh
 ```
 
 This creates or updates `../.work/tv3-viz-venv`, which avoids installing packages into Homebrew's externally managed Python.
+
+**Always use the repo shell wrappers** (`./scripts/plot_ulog.sh`, `./scripts/plot_ulog_replay.sh`, etc.). They activate the viz venv and prepend its `bin/` directory to `PATH` so the Rerun viewer executable is found. Calling `python3 tools/...` directly will fail with missing `pyvista` / `rerun-sdk` unless you manage the venv yourself.
+
+Headless smoke test (no GUI windows):
+
+```bash
+./scripts/validate_viz_commands.sh
+```
 
 ## Logger Topic Profile
 
@@ -81,7 +103,99 @@ Archive flight-hardware or ground-test logs copied from QGroundControl, an SD ca
 ./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id load-cell-bench-001
 ```
 
-## Plot a SITL Run
+## Live SITL (Hawkeye)
+
+Start Hawkeye before launching SITL so the UDP stream is already listening:
+
+```bash
+./scripts/run_hawkeye.sh
+```
+
+Then run SITL in a second terminal (see [simulation.md](simulation.md) for the full workflow). Hawkeye receives pose updates on UDP `19410`; it is not the physics source of truth.
+
+Install Hawkeye on macOS with:
+
+```bash
+brew tap px4/px4 && brew install px4/px4/hawkeye
+```
+
+## Interactive 3D Review (PyVista)
+
+These open a PyVista window. Orbit with the mouse; there is no timeline scrubber. Use `--time` to choose which log instant to display (default: last frame).
+
+Vehicle frame with per-engine roll/yaw sliders:
+
+```bash
+./scripts/view_vehicle_frame.sh
+```
+
+Four-panel overview (interactive):
+
+```bash
+./scripts/view_vehicle_frame.sh --overview
+```
+
+Flight path plus vehicle attitude at one instant:
+
+```bash
+./scripts/plot_ulog_replay.sh --latest
+./scripts/plot_ulog_replay.sh --latest --time 12.5 --camera track
+```
+
+Engine mounts and thrust vectors at one instant:
+
+```bash
+./scripts/plot_ulog_engines.sh --latest
+./scripts/plot_ulog_engines.sh --latest --time 8.0
+```
+
+Export PNG snapshots (headless, no window):
+
+```bash
+./scripts/view_vehicle_frame.sh --save build/vehicle_frame/tv3_lander_v1.png
+./scripts/plot_ulog_replay.sh --latest -o /tmp/trajectory.png --time 12.5
+./scripts/plot_ulog_engines.sh --latest -o /tmp/engines.png --time 12.5
+```
+
+Camera presets for PyVista: `iso`, `top`, `side`, `front`, `forward_up`, `overview`, `track`.
+
+## Timed Log Playback (Rerun)
+
+Use Rerun when you want to scrub through time. Guidance metrics are Rerun-only (no PyVista 3D scene).
+
+```bash
+./scripts/plot_ulog_replay.sh --latest --rerun
+./scripts/plot_ulog_replay.sh --latest --scene guidance
+./scripts/plot_ulog_engines.sh --latest --rerun
+```
+
+Save a recording for offline review (headless, no viewer window):
+
+```bash
+./scripts/plot_ulog_replay.sh --latest --rerun -o /tmp/tv3_trajectory.rrd
+./scripts/plot_ulog_replay.sh --latest --scene guidance -o /tmp/tv3_guidance.rrd
+./scripts/plot_ulog_engines.sh --latest --rerun -o /tmp/tv3_engines.rrd
+```
+
+Re-open a saved recording:
+
+```bash
+rerun /tmp/tv3_trajectory.rrd
+```
+
+Or invoke the venv binary directly:
+
+```bash
+../.work/tv3-viz-venv/bin/rerun /tmp/tv3_trajectory.rrd
+```
+
+Pass an explicit log path instead of `--latest`:
+
+```bash
+./scripts/plot_ulog_replay.sh logs/sim/YYYY-MM-DD/<run-id>/HH_MM_SS.ulg
+```
+
+## 2D Timeseries Review (Matplotlib)
 
 Run the sim normally, then plot the newest archived ULog:
 
@@ -110,7 +224,18 @@ To see what a log actually contains:
 
 If a panel says a topic is missing, the log was probably recorded before the TV3 profile was synced, or that module did not publish during the run. Start a new run after the sync step and check again.
 
-## SIH And Hawkeye
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `missing dependency: install pyvista` / `rerun-sdk` | Run `./scripts/setup_viz_env.sh`, then use `./scripts/...` wrappers |
+| `Rerun viewer not found on PATH` | Use repo scripts (they prepend `../.work/tv3-viz-venv/bin` to `PATH`) |
+| `gRPC has been unable to connect` with `--rerun` | Same as above — viewer binary was not found |
+| PyVista window does not appear | You passed `-o *.png` (headless export) — omit `-o` for interactive |
+| Guidance PNG rejected | Expected — guidance is Rerun-only; use `--rerun` or `-o file.rrd` |
+| `ULog not found` with `--latest` | Run SITL first so logs land under `logs/sim/`, or pass an explicit `.ulg` path |
+
+## SIH Ground-Truth Topics
 
 For simulator-owned truth data, prefer ULog topics emitted by `tv3_sih`:
 
@@ -121,4 +246,4 @@ vehicle_local_position_groundtruth
 vehicle_global_position_groundtruth
 ```
 
-Hawkeye is a viewer on UDP `19410`; it is not the physics source of truth. Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 tv3 module outputs.
+Use ULog for PX4 controller state, vehicle estimates, commands, and TV3 module outputs. Hawkeye is visualization only.

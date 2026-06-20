@@ -16,6 +16,8 @@ Manual notes and status overrides live in [config/completion_status.json](../con
 
 For build and run instructions, see [docs/simulation.md](simulation.md).
 
+**Note on simulation fidelity**: SIH is a deliberately simplified plant. See the "Known Limitations and Simplifications" section in `docs/simulation.md` for physics and architectural items that are accepted for current phases (including fixed inertia, kinematic contacts, no aero, custom modules, manifest/param duplication, and allocator patch).
+
 ## Status Vocabulary
 
 | Status | Meaning |

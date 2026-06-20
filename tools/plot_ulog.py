@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate TV3-focused review plots from a PX4 ULog."""
+"""Generate TV3-focused static review plots from a PX4 ULog."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from pathlib import Path
 import sys
 from typing import Iterable
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 ARCHIVED_SIM_LOG_ROOT = REPO_ROOT / "logs" / "sim"
 SITL_ROOTFS_LOG_ROOT = REPO_ROOT.parent / ".work" / "px4-tv3" / "build" / "px4_sitl_default" / "rootfs" / "log"
 DEFAULT_LOG_ROOTS = (ARCHIVED_SIM_LOG_ROOT, SITL_ROOTFS_LOG_ROOT)
@@ -64,9 +66,7 @@ def import_pyplot(show: bool):
         raise SystemExit("missing dependency: install matplotlib with `python3 -m pip install -r requirements-viz.txt`") from exc
 
     if show:
-        if not matplotlib.get_backend().lower().endswith("agg"):
-            pass
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             matplotlib.use("MacOSX")
         else:
             try:
@@ -185,8 +185,7 @@ def build_figure(ulog, log_path: Path, show: bool):
     figure, axes = plt.subplots(6, 1, figsize=(13, 13), sharex=True, constrained_layout=True)
     figure.suptitle(f"TV3 ULog Review: {log_path.name}")
 
-    count = 0
-    count += plotted(
+    count = plotted(
         axes[0],
         datasets,
         "tv3_status",

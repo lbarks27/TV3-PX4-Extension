@@ -1,4 +1,4 @@
-"""Shared ULog replay utilities for TV3 matplotlib scene animators."""
+"""Shared ULog replay utilities for TV3 log replay and static previews."""
 
 from __future__ import annotations
 
@@ -14,22 +14,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.plot_ulog import find_latest_ulog, import_pyplot, import_ulog  # noqa: E402
-from tools.view_vehicle_frame import (  # noqa: E402
-    DARK_BG,
-    DARK_MUTED,
-    DARK_PANEL,
-    DARK_TEXT,
-    apply_dark_theme,
-)
-
+from tools.plot_ulog import find_latest_ulog, import_ulog  # noqa: E402
 DEFAULT_VEHICLE = REPO_ROOT / "config/vehicles/tv3_lander_v1.json"
 
 TOPIC_ALIASES = {
     "tv3_engine_state": ("tv3_engine_state", "rocket_engine_state"),
     "tv3_engine_command": ("tv3_engine_command", "rocket_engine_command"),
-    "vehicle_attitude": ("vehicle_attitude", "vehicle_attitude_groundtruth"),
-    "vehicle_local_position": ("vehicle_local_position", "vehicle_local_position_groundtruth"),
+    "vehicle_attitude": ("vehicle_attitude_groundtruth", "vehicle_attitude"),
+    "vehicle_local_position": ("vehicle_local_position_groundtruth", "vehicle_local_position"),
     "tv3_status": ("tv3_status",),
     "tv3_guidance_status": ("tv3_guidance_status",),
     "tv3_thrust": ("tv3_thrust",),
@@ -197,137 +189,11 @@ def frame_index_at_time(frames: Sequence[Any], time_s: float) -> int:
     return min(range(len(frames)), key=lambda index: abs(frames[index].time_s - time_s))
 
 
-def save_animation(figure, animation, output: Path, fps: float) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    suffix = output.suffix.lower()
-    facecolor = DARK_BG
-    if suffix == ".mp4":
-        try:
-            animation.save(output, writer="ffmpeg", fps=fps, dpi=150, savefig_kwargs={"facecolor": facecolor})
-            return
-        except Exception:
-            gif_path = output.with_suffix(".gif")
-            animation.save(
-                gif_path,
-                writer="pillow",
-                fps=fps,
-                dpi=120,
-                savefig_kwargs={"facecolor": facecolor},
-            )
-            print(f"ffmpeg unavailable; wrote {gif_path}")
-            return
-    if suffix == ".gif":
-        animation.save(output, writer="pillow", fps=fps, dpi=120, savefig_kwargs={"facecolor": facecolor})
-        return
-    raise SystemExit(f"unsupported animation output format: {output.suffix}")
-
-
 def scalar_series_or_zeros(dataset, field_name: str, times_us: np.ndarray) -> np.ndarray:
     values = topic_field(dataset, field_name) if dataset is not None else None
     if values is None:
         return np.zeros_like(times_us)
     return values
-
-
-class InteractiveReplayShell:
-    """Time slider, play/pause, and optional 3D zoom hooks for replay scenes."""
-
-    def __init__(
-        self,
-        figure,
-        frames: Sequence[Any],
-        *,
-        show_frame: FrameCallback,
-        window_title: str,
-        fps: float,
-        help_text: str = "space play/pause | drag slider scrub | scroll zoom | r reset view",
-        on_scroll: ScrollCallback | None = None,
-        on_key_extra: KeyCallback | None = None,
-    ) -> None:
-        from matplotlib import animation
-        from matplotlib.widgets import Slider
-
-        self.figure = figure
-        self.frames = frames
-        self.show_frame = show_frame
-        self.playing = {"value": True}
-        self.scrubbing = {"value": False}
-        self.on_scroll = on_scroll
-        self.on_key_extra = on_key_extra
-
-        if getattr(figure.canvas.manager, "set_window_title", None):
-            figure.canvas.manager.set_window_title(window_title)
-
-        slider_ax = figure.add_axes((0.08, 0.05, 0.88, 0.03))
-        slider_ax.set_facecolor(DARK_PANEL)
-        self.time_slider = Slider(
-            slider_ax,
-            "time (s)",
-            frames[0].time_s,
-            frames[-1].time_s,
-            valinit=frames[0].time_s,
-            valfmt="%.2f",
-            color="#ff7f0e",
-        )
-        self.time_slider.label.set_color(DARK_TEXT)
-        self.time_slider.valtext.set_color(DARK_TEXT)
-        apply_dark_theme(figure, [slider_ax])
-
-        figure.text(
-            0.08,
-            0.015,
-            help_text,
-            fontsize=8,
-            family="monospace",
-            color=DARK_MUTED,
-        )
-
-        def update(frame_index: int):
-            if not self.playing["value"] or self.scrubbing["value"]:
-                return ()
-            self.show_frame(frame_index)
-            return ()
-
-        self.anim = animation.FuncAnimation(
-            figure,
-            update,
-            frames=len(frames),
-            interval=max(1000.0 / fps, 1.0),
-            blit=False,
-            repeat=True,
-        )
-
-        self.time_slider.on_changed(self._on_slider_change)
-        figure.canvas.mpl_connect("key_press_event", self._on_key)
-        if on_scroll is not None:
-            figure.canvas.mpl_connect("scroll_event", on_scroll)
-
-    def _on_slider_change(self, value: float) -> None:
-        if self.scrubbing["value"]:
-            return
-        self.playing["value"] = False
-        self.anim.event_source.stop()
-        self.show_frame(frame_index_at_time(self.frames, float(value)))
-
-    def _on_key(self, event) -> None:
-        if event.key == " ":
-            self.playing["value"] = not self.playing["value"]
-            if self.playing["value"]:
-                self.anim.event_source.start()
-            else:
-                self.anim.event_source.stop()
-            self.figure.canvas.draw_idle()
-        elif self.on_key_extra is not None:
-            self.on_key_extra(event)
-
-    def sync_slider(self, time_s: float) -> None:
-        if abs(self.time_slider.val - time_s) > 1e-3:
-            self.scrubbing["value"] = True
-            self.time_slider.set_val(time_s)
-            self.scrubbing["value"] = False
-
-    def run(self) -> None:
-        import_pyplot(True).show()
 
 
 __all__ = [
@@ -336,7 +202,6 @@ __all__ = [
     "DEFAULT_VEHICLE",
     "GUIDANCE_PHASE_LABELS",
     "GUIDANCE_UNREACHABLE_LABELS",
-    "InteractiveReplayShell",
     "REPO_ROOT",
     "TOPIC_ALIASES",
     "TV3_MODE_LABELS",
@@ -346,14 +211,12 @@ __all__ = [
     "euler_angles_deg",
     "find_latest_ulog",
     "frame_index_at_time",
-    "import_pyplot",
     "import_ulog",
     "interpolate_series",
     "load_manifest",
     "ned_to_plot_xyz",
     "resolve_manifest",
     "rotation_matrix_from_quat",
-    "save_animation",
     "scalar_series_or_zeros",
     "topic_dataset",
     "topic_field",

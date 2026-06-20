@@ -16,6 +16,9 @@ depricated/  # catch common typo
 .vscode/
 .idea/
 
+# Local bench venv
+.venv-bench/
+
 # Python / test artifacts
 __pycache__/
 .pytest_cache/

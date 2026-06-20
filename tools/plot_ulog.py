@@ -63,7 +63,17 @@ def import_pyplot(show: bool):
     except ImportError as exc:
         raise SystemExit("missing dependency: install matplotlib with `python3 -m pip install -r requirements-viz.txt`") from exc
 
-    if not show:
+    if show:
+        if not matplotlib.get_backend().lower().endswith("agg"):
+            pass
+        elif sys.platform == "darwin":
+            matplotlib.use("MacOSX")
+        else:
+            try:
+                matplotlib.use("TkAgg")
+            except ImportError:
+                pass
+    else:
         matplotlib.use("Agg")
 
     import matplotlib.pyplot as plt

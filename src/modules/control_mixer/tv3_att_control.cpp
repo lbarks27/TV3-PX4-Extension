@@ -140,6 +140,7 @@ private:
 		}
 
 		update_guidance_reference(trajectory_setpoint, trajectory_updated, now);
+		apply_roll_program();
 
 		Quatf q(_attitude.q);
 		Quatf q_ref(_reference_q);
@@ -189,7 +190,8 @@ private:
 		vehicle_thrust_setpoint_s thrust{};
 		thrust.timestamp = now;
 		thrust.timestamp_sample = _attitude.timestamp_sample;
-		thrust.xyz[0] = powered_flight ? 1.f : 0.f;
+		// TV3 axial thrust is scheduled by tv3_guidance / engine_state, not PX4 servos.
+		thrust.xyz[0] = 0.f;
 		thrust.xyz[1] = 0.f;
 		thrust.xyz[2] = 0.f;
 		_thrust_pub.publish(thrust);
@@ -235,6 +237,29 @@ private:
 	const vehicle_local_position_s &guidance_position(hrt_abstime now) const
 	{
 		return local_position_valid(now) ? _local_position : _groundtruth_position;
+	}
+
+	void apply_roll_program()
+	{
+		if (_roll_program_deg <= 0.f || _roll_program_dur_s <= 0.f) {
+			return;
+		}
+
+		const bool powered_flight = _status.mode == tv3_status_s::MODE_IGNITION_PENDING
+					    || _status.mode == tv3_status_s::MODE_BOOST
+					    || _status.mode == tv3_status_s::MODE_COAST;
+
+		if (!powered_flight || _status.burn_time_s < _roll_program_start_s) {
+			return;
+		}
+
+		const float elapsed_s = _status.burn_time_s - _roll_program_start_s;
+		const float frac = math::constrain(elapsed_s / _roll_program_dur_s, 0.f, 1.f);
+		const float roll_rad = _roll_program_deg * kDegToRad * frac;
+		Quatf reference{_reference_q};
+		const Quatf roll_offset{AxisAnglef{Vector3f{1.f, 0.f, 0.f}, roll_rad}};
+		reference = reference * roll_offset;
+		reference.copyTo(_reference_q);
 	}
 
 	void update_guidance_reference(const trajectory_setpoint_s &trajectory_setpoint, bool trajectory_updated, hrt_abstime now)
@@ -404,6 +429,21 @@ private:
 		if (p != PARAM_INVALID) {
 			param_get(p, &_torque_yaw_max);
 		}
+
+		p = param_find("RK_ATT_ROLL_DEG");
+		if (p != PARAM_INVALID) {
+			param_get(p, &_roll_program_deg);
+		}
+
+		p = param_find("RK_ATT_ROLL_T0");
+		if (p != PARAM_INVALID) {
+			param_get(p, &_roll_program_start_s);
+		}
+
+		p = param_find("RK_ATT_ROLL_DT");
+		if (p != PARAM_INVALID) {
+			param_get(p, &_roll_program_dur_s);
+		}
 	}
 
 	float _att_p_rail{2.f};
@@ -424,6 +464,9 @@ private:
 	float _position_gain{0.14f};
 	float _guidance_tilt_gain{0.12f};
 	float _guidance_tilt_max_deg{20.f};
+	float _roll_program_deg{0.f};
+	float _roll_program_start_s{0.f};
+	float _roll_program_dur_s{0.f};
 
 	vehicle_attitude_s _attitude{};
 	vehicle_angular_velocity_s _angular_velocity{};

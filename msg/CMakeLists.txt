@@ -4,6 +4,7 @@ set(config_msg_list_external
 	Tv3Thrust.msg
 	Tv3MotorReference.msg
 	Tv3EngineCommand.msg
+	Tv3GimbalCommand.msg
 	Tv3EngineState.msg
 	Tv3ModeStatus.msg
 	Tv3GuidanceStatus.msg

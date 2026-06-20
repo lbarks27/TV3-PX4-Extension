@@ -8,12 +8,11 @@ running PX4 firmware.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
-
-import yaml
 
 SOURCE_ADC = 0
 SOURCE_REFERENCE = 1
@@ -597,7 +596,7 @@ def motor_reference_from_manifest(manifest: dict, *, thrust_n: float, ignition_m
 
 
 def load_manifest(path: Path | str) -> dict:
-    return yaml.safe_load(Path(path).read_text())
+    return json.loads(Path(path).read_text())
 
 
 def thrust_n_from_adc_raw(raw_count: int, config: LoadCellConfig) -> float:

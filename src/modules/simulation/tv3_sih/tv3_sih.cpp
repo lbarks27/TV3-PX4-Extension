@@ -18,14 +18,11 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/tv3_engine_command.h>
 #include <uORB/topics/tv3_engine_state.h>
-#include <uORB/topics/tv3_guidance_status.h>
+#include <uORB/topics/tv3_gimbal_command.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_local_position.h>
-#include <uORB/topics/vehicle_thrust_setpoint.h>
-#include <uORB/topics/vehicle_torque_setpoint.h>
-
 #include <math.h>
 #include <errno.h>
 #include <sys/time.h>
@@ -35,6 +32,7 @@ using namespace time_literals;
 using matrix::AxisAnglef;
 using matrix::Eulerf;
 using matrix::Quatf;
+using matrix::Vector;
 using matrix::Vector3f;
 
 namespace
@@ -84,6 +82,8 @@ struct EngineGroup {
 	float thrust_fraction{1.f};
 	float pitch_trim{0.f};
 	float yaw_trim{0.f};
+	float pitch_max_rad{math::radians(5.f)};
+	float yaw_max_rad{math::radians(5.f)};
 };
 
 static Vector3f normalize_or_default(const Vector3f &v, const Vector3f &def)
@@ -207,7 +207,6 @@ private:
 
 		_engine_state_sub.update(&_engine_state);
 		_engine_command_sub.update(&_engine_command);
-		_guidance_status_sub.update(&_guidance_status);
 
 		const hrt_abstime now = hrt_absolute_time();
 		const float dt = math::constrain((now - _last_update) * 1e-6f, 0.001f, 0.05f);
@@ -255,6 +254,8 @@ private:
 			_groups[i].thrust_fraction = getg("TF", _num_groups > 0 ? 1.f / _num_groups : 1.f);
 			_groups[i].pitch_trim = getg("PTR", 0.f);
 			_groups[i].yaw_trim   = getg("YTR", 0.f);
+			_groups[i].pitch_max_rad = math::radians(getg("PMAX", 5.f));
+			_groups[i].yaw_max_rad = math::radians(getg("YMAX", 5.f));
 		}
 
 		// Inertia (diagonal). Allow explicit RK_I** override; otherwise pick sensible default by engine count.
@@ -309,49 +310,22 @@ private:
 		return Vector3f{_body_com_x_m, 0.f, 0.f};
 	}
 
-	float active_thrust_n() const
-	{
-		float thrust_n = 0.f;
-		const int count = math::constrain(static_cast<int>(_engine_state.engine_count), 0,
-						  static_cast<int>(tv3_engine_state_s::MAX_ENGINES));
-
-		for (int i = 0; i < count; ++i) {
-			if ((_engine_state.active_mask & (1u << i)) == 0) {
-				continue;
-			}
-
-			float engine_thrust = _engine_state.filtered_thrust_n[i];
-
-			if (!PX4_ISFINITE(engine_thrust) || engine_thrust <= 0.f) {
-				engine_thrust = _engine_state.measured_thrust_n[i];
-			}
-
-			if (!PX4_ISFINITE(engine_thrust) || engine_thrust <= 0.f) {
-				engine_thrust = _engine_state.expected_thrust_n[i];
-			}
-
-			thrust_n += math::max(engine_thrust, 0.f);
-		}
-
-		return thrust_n;
-	}
-
 	void step_dynamics(float dt)
 	{
 		const int command_count = math::constrain(static_cast<int>(_engine_command.engine_count), 0,
 							  static_cast<int>(tv3_engine_command_s::MAX_ENGINES));
 
-		// Capture per-engine commands (deg -> rad). These drive individual thrust directions.
+		// Gimbal angles (primary roll + secondary splay/yaw) come from tv3_engine_command.
+		// The plant is a pure forward dynamics model: force and torque are computed from
+		// current engine thrusts (from motor model) and the instantaneous (rate-limited) gimbal angles.
 		for (int i = 0; i < command_count && i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = _engine_command.commanded_pitch_deg[i] * kDegToRad;
-			_cmd_yaw_rad[i]   = _engine_command.commanded_yaw_deg[i] * kDegToRad;
-			_cmd_splay_rad[i] = _engine_command.commanded_splay_deg[i] * kDegToRad;
+			_cmd_yaw_rad[i] = _engine_command.commanded_yaw_deg[i] * kDegToRad;
 		}
-		// Zero any unused higher engines
+
 		for (int i = command_count; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = 0.f;
 			_cmd_yaw_rad[i] = 0.f;
-			_cmd_splay_rad[i] = 0.f;
 		}
 
 		// Basic first-order actuator / rate limit for gimbals *in the plant* (commands not applied instantly).
@@ -364,8 +338,6 @@ private:
 					_applied_pitch_rad[i] - max_step, _applied_pitch_rad[i] + max_step);
 				_applied_yaw_rad[i] = math::constrain(_cmd_yaw_rad[i],
 					_applied_yaw_rad[i] - max_step, _applied_yaw_rad[i] + max_step);
-				_applied_splay_rad[i] = math::constrain(_cmd_splay_rad[i],
-					_applied_splay_rad[i] - max_step, _applied_splay_rad[i] + max_step);
 			}
 		}
 
@@ -375,7 +347,6 @@ private:
 
 		Vector3f engine_force_b{0.f, 0.f, 0.f};
 		Vector3f engine_tau_b{0.f, 0.f, 0.f};
-		float total_engine_thrust_n{0.f};
 
 		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
 		for (int i = 0; i < neng; ++i) {
@@ -394,8 +365,6 @@ private:
 				continue;
 			}
 
-			total_engine_thrust_n += thr;
-
 			const Vector3f dir_b = engine_thrust_dir_body(i);
 			const Vector3f f_b = dir_b * thr;
 			engine_force_b += f_b;
@@ -404,53 +373,13 @@ private:
 			engine_tau_b += r_b.cross(f_b);
 		}
 
-		// Scale delivered engine thrust to guidance demand. Motor curves report full
-		// chamber thrust; guidance publishes the hover/ascent envelope as required_thrust_n.
-		float thrust_scale = 1.f;
-		const int32_t gd_enable = get_param_int32("RK_GD_ENABLE", 0);
+		// Net force and torque are produced solely by the current chamber thrusts (engine_state)
+		// deflected by the commanded (slew-limited) gimbal angles. Net axial reduction for splay-throttle
+		// vehicles is achieved by the upstream splay angle commands (see tv3_mode_manager collective logic).
+		Vector3f force_b = engine_force_b;
+		Vector3f tau_b = engine_tau_b;
 
-		if (gd_enable > 0) {
-			if (_guidance_status.timestamp > 0 && _guidance_status.thrust_solution_valid
-			    && _guidance_status.required_thrust_n > 0.f && total_engine_thrust_n > 1.f) {
-				thrust_scale = math::constrain(_guidance_status.required_thrust_n / total_engine_thrust_n, 0.f, 1.f);
-			} else if (total_engine_thrust_n > 1.f || _guidance_status.active) {
-				thrust_scale = 0.f;
-			}
-		}
-
-		Vector3f force_b = engine_force_b * thrust_scale;
-		Vector3f tau_b = engine_tau_b * thrust_scale;
-
-		// Bridge from torque/thrust setpoints (produced by tv3_att_control + control allocator).
-		// The tv3_engine_command gimbal angles (pitch/yaw/splay) are currently not populated by
-		// upper layers (only ignition fields are), so per-engine dir rotation produces no control
-		// torques. Directly realizing the requested body wrench here lets the attitude loop close
-		// in SIH, keeping the initial upright orientation (preventing "on its side" in Hawkeye)
-		// and yielding stable flight for validation scenarios.
-		{
-			bool have_gimbal_cmd = false;
-			for (int i = 0; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
-				if (fabsf(_applied_pitch_rad[i]) > 1e-4f || fabsf(_applied_yaw_rad[i]) > 1e-4f || fabsf(_applied_splay_rad[i]) > 1e-4f) {
-					have_gimbal_cmd = true;
-					break;
-				}
-			}
-			if (!have_gimbal_cmd) {
-				vehicle_torque_setpoint_s t_sp{};
-				if (_torque_setpoint_sub.update(&t_sp)) {
-					_last_torque_setpoint = t_sp;
-				}
-
-				if (_last_torque_setpoint.timestamp > 0) {
-					tau_b(0) += _last_torque_setpoint.xyz[0];
-					tau_b(1) += _last_torque_setpoint.xyz[1];
-					tau_b(2) += _last_torque_setpoint.xyz[2];
-				}
-			}
-			// Thrust setpoint is a normalized axial command; the delivered magnitude and any
-			// splay-induced axial loss still come from engine_state + engine_command (ignition path).
-			// Leave force_b as accumulated from engines for consistency with motor/load-cell paths.
-		}
+		publish_gimbal_command();
 
 		// Translational (world/NED z-down)
 		// Rotate body force to world. In PX4 matrix Quatf, rotateVector(v_body) produces v_world for the attitude quat.
@@ -496,9 +425,9 @@ private:
 				      _inertia_diag(1) * _omega_b(1),
 				      _inertia_diag(2) * _omega_b(2)};
 		const Vector3f omega_x_Iw = _omega_b.cross(Iomega);
-		// Light angular rate damping models TVC nozzle aerodynamic drag and keeps the
-		// SIH plant numerically tame when thrust-disturbance torques spike at ignition.
-		const float rate_damp_nm = get_param_float("RK_SIH_RATE_DAMP", 2.5f);
+		// Optional light angular rate damping (off by default). Can be enabled via RK_SIH_RATE_DAMP
+		// for numerical stability during ignition spikes if needed; not part of the nominal physical model.
+		const float rate_damp_nm = get_param_float("RK_SIH_RATE_DAMP", 0.f);
 		Vector3f tau_net = tau_b - omega_x_Iw;
 
 		if (!on_rail && rate_damp_nm > 0.f) {
@@ -623,8 +552,6 @@ private:
 		Vector3f _euler{};
 	tv3_engine_state_s _engine_state{};
 	tv3_engine_command_s _engine_command{};
-	tv3_guidance_status_s _guidance_status{};
-	vehicle_torque_setpoint_s _last_torque_setpoint{};
 
 	// Proper 6DOF state (replaces puppet euler/attitude logic)
 	Quatf _att_q{AxisAnglef(Vector3f{0.f, 1.f, 0.f}, M_PI_F * 0.5f)};
@@ -641,53 +568,72 @@ private:
 	// Latest per-engine gimbal commands (from TV3EngineCommand). These are the "desired".
 	float _cmd_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
 	float _cmd_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
-	float _cmd_splay_rad[tv3_engine_command_s::MAX_ENGINES]{};
+
 
 	// Actually applied (rate-limited) angles used for thrust direction this tick. Provides basic actuator dynamics in plant.
 	float _applied_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
 	float _applied_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
-	float _applied_splay_rad[tv3_engine_command_s::MAX_ENGINES]{};
 
-	// Compute body-frame unit thrust direction for one engine given its commands (includes trims).
-	// Rotations around the group axes produce the physical side-force components used for torque.
-	Vector3f engine_thrust_dir_body(int i) const
+	Vector3f engine_thrust_dir_body_angles(int i, float pitch_rad, float yaw_rad) const
 	{
 		if (i < 0 || i >= _num_groups) {
 			return Vector3f{1.f, 0.f, 0.f};
 		}
 
 		const EngineGroup &g = _groups[i];
-		// Prefer rate-limited applied angles (issue-10 actuator dynamics); fall back to raw cmd.
-		const float p = (_applied_pitch_rad[i] != 0.f ? _applied_pitch_rad[i] : _cmd_pitch_rad[i]) + g.pitch_trim;
-		const float y = (_applied_yaw_rad[i]   != 0.f ? _applied_yaw_rad[i]   : _cmd_yaw_rad[i])   + g.yaw_trim;
-		const float s = (_applied_splay_rad[i] != 0.f ? _applied_splay_rad[i] : _cmd_splay_rad[i]);
-
+		const float p = pitch_rad + g.pitch_trim;
+		const float y = yaw_rad + g.yaw_trim;
 		Vector3f d = g.thrust_axis;
 
-		// Apply rotations for the three degrees of freedom using the configured axes.
-		// Order: splay (large cant for lander throttle) then pitch then yaw.
-		// This produces both axial thrust reduction (cos component) and side forces
-		// that generate torques when applied at offset positions.
-		if (fabsf(s) > 1e-6f) {
-			Quatf qs(AxisAnglef(g.pitch_axis, s)); // splay often acts in the primary cant plane for each engine
-			d = qs.rotateVector(d);
-		}
 		if (fabsf(p) > 1e-6f) {
 			Quatf qp(AxisAnglef(g.pitch_axis, p));
 			d = qp.rotateVector(d);
 		}
+
 		if (fabsf(y) > 1e-6f) {
-			Quatf qy(AxisAnglef(g.yaw_axis, y));
+			Vector3f yaw_axis = g.yaw_axis;
+
+			if (fabsf(p) > 1e-6f) {
+				Quatf qp_axis(AxisAnglef(g.pitch_axis, p));
+				yaw_axis = qp_axis.rotateVector(yaw_axis);
+			}
+
+			Quatf qy(AxisAnglef(yaw_axis, y));
 			d = qy.rotateVector(d);
 		}
 
 		const float n = d.norm();
+
 		if (n > 1e-6f) {
 			d /= n;
 		} else {
 			d = g.thrust_axis;
 		}
+
 		return d;
+	}
+
+	Vector3f engine_thrust_dir_body(int i) const
+	{
+		const float p = (_applied_pitch_rad[i] != 0.f ? _applied_pitch_rad[i] : _cmd_pitch_rad[i]);
+		const float y = (_applied_yaw_rad[i] != 0.f ? _applied_yaw_rad[i] : _cmd_yaw_rad[i]);
+		return engine_thrust_dir_body_angles(i, p, y);
+	}
+
+	void publish_gimbal_command()
+	{
+		tv3_gimbal_command_s gimbal{};
+		gimbal.timestamp = hrt_absolute_time();
+		gimbal.engine_count = static_cast<uint8_t>(_num_groups);
+
+		for (int i = 0; i < _num_groups && i < tv3_gimbal_command_s::MAX_ENGINES; ++i) {
+			const float pitch_rad = (_applied_pitch_rad[i] != 0.f ? _applied_pitch_rad[i] : _cmd_pitch_rad[i]);
+			const float yaw_rad = (_applied_yaw_rad[i] != 0.f ? _applied_yaw_rad[i] : _cmd_yaw_rad[i]);
+			gimbal.commanded_pitch_deg[i] = pitch_rad / kDegToRad;
+			gimbal.commanded_yaw_deg[i] = yaw_rad / kDegToRad;
+		}
+
+		_gimbal_command_pub.publish(gimbal);
 	}
 
 	PX4Accelerometer _px4_accel{1310988};
@@ -696,9 +642,6 @@ private:
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _engine_state_sub{ORB_ID(tv3_engine_state)};
 	uORB::Subscription _engine_command_sub{ORB_ID(tv3_engine_command)};
-	uORB::Subscription _torque_setpoint_sub{ORB_ID(vehicle_torque_setpoint)};
-	uORB::Subscription _thrust_setpoint_sub{ORB_ID(vehicle_thrust_setpoint)};
-	uORB::Subscription _guidance_status_sub{ORB_ID(tv3_guidance_status)};
 	uORB::Publication<vehicle_attitude_s> _attitude_pub{ORB_ID(vehicle_attitude)};
 	uORB::Publication<vehicle_attitude_s> _attitude_groundtruth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_angular_velocity_s> _angular_velocity_pub{ORB_ID(vehicle_angular_velocity)};
@@ -708,6 +651,7 @@ private:
 	uORB::Publication<vehicle_global_position_s> _global_position_pub{ORB_ID(vehicle_global_position)};
 	uORB::Publication<vehicle_global_position_s> _global_position_groundtruth_pub{ORB_ID(vehicle_global_position_groundtruth)};
 	uORB::Publication<manual_control_setpoint_s> _manual_control_pub{ORB_ID(manual_control_setpoint)};
+	uORB::Publication<tv3_gimbal_command_s> _gimbal_command_pub{ORB_ID(tv3_gimbal_command)};
 };
 
 extern "C" __EXPORT int tv3_sih_main(int argc, char *argv[])

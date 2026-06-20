@@ -7,13 +7,12 @@ allocator reachability so guidance can be validated without running PX4 firmware
 
 from __future__ import annotations
 
+import json
 import math
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
-
-import yaml
 
 from tools.tv3_control_allocator import (
     CONTROL_NO_ACTIVE_ENGINES,
@@ -24,6 +23,7 @@ from tools.tv3_control_allocator import (
     guidance_reachability,
     load_manifest,
     motor_reference_from_thrust,
+    vehicle_full_thrust_n,
 )
 
 GRAVITY_MPS2 = 9.80665
@@ -140,7 +140,7 @@ def load_guidance_config(profile: dict) -> GuidanceConfig:
 
 
 def load_flight_profile(path: Path | str) -> dict:
-    return yaml.safe_load(Path(path).read_text())
+    return json.loads(Path(path).read_text())
 
 
 def required_twr(config: GuidanceConfig, phase: int) -> float:
@@ -336,7 +336,7 @@ def run_monte_carlo(
     seed: int = 5,
     phase: int = PHASE_WAYPOINT_TRACK,
     altitude_m: float = 12.0,
-    required_thrust_n: float = 620.0,
+    required_thrust_n: float | None = None,
 ) -> MonteCarloReport:
     vehicle = load_manifest(vehicle_path)
     profile = load_flight_profile(profile_path)
@@ -352,7 +352,9 @@ def run_monte_carlo(
     )
 
     base_mass = float(vehicle["vehicle"]["body_mass_kg"])
-    base_thrust = float(vehicle["vehicle"]["ca_reference_thrust_n"])
+    base_thrust = vehicle_full_thrust_n(vehicle)
+    if required_thrust_n is None:
+        required_thrust_n = base_thrust
 
     for _ in range(samples):
         sample = random_sample(rng)

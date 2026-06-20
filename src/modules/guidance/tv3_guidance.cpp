@@ -229,8 +229,8 @@ private:
 		_landing_point(1) = read_param_float("RK_GD_LAND_E", _landing_point(1));
 		_landing_point(2) = read_param_float("RK_GD_LAND_D", _landing_point(2));
 		_sim_groundtruth_fallback = read_param_int32("RK_GD_SIM_GT", _sim_groundtruth_fallback);
-		_ascent_mode = static_cast<uint8_t>(read_param_int32("RK_GD_ASCENT_MODE", _ascent_mode));
-		_apogee_mode = static_cast<uint8_t>(read_param_int32("RK_GD_APOGEE_MODE", _apogee_mode));
+		_ascent_mode = static_cast<uint8_t>(read_param_int32("RK_GD_ASC_MODE", _ascent_mode));
+		_apogee_mode = static_cast<uint8_t>(read_param_int32("RK_GD_APX_MODE", _apogee_mode));
 		_landing_mode = static_cast<uint8_t>(read_param_int32("RK_GD_LAND_MODE", _landing_mode));
 
 		load_waypoint_parameters(0, 1);
@@ -259,7 +259,7 @@ private:
 		const float acceptance_override = read_param_float(buffer, 0.f);
 		waypoint.acceptance_radius_m = acceptance_override > 0.f ? acceptance_override : default_acceptance;
 
-		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_CRUISE_MS", waypoint_number);
+		snprintf(buffer, sizeof(buffer), "RK_GD_WP%u_C_MS", waypoint_number);
 		const float cruise_override = read_param_float(buffer, 0.f);
 		waypoint.cruise_speed_m_s = cruise_override > 0.f ? cruise_override : default_cruise;
 	}
@@ -401,8 +401,6 @@ private:
 		}
 
 		float max_thrust_n = 0.f;
-		float min_thrust_n = 0.f;
-		const float cos_splay = cosf(_splay_max_deg * kDegToRad);
 		bool have_active_engine = false;
 
 		for (int i = 0; i < _motor_reference.engine_count && i < 4; ++i) {
@@ -412,7 +410,6 @@ private:
 
 			const float thrust = math::max(_motor_reference.expected_thrust_n_engine[i], 0.f);
 			max_thrust_n += thrust;
-			min_thrust_n += thrust * cos_splay;
 			have_active_engine = true;
 		}
 
@@ -423,7 +420,10 @@ private:
 		}
 
 		const float required_thrust_n = math::max(_last_required_thrust_n, 0.f);
-		if (required_thrust_n > max_thrust_n + 1.f || required_thrust_n + 1.f < min_thrust_n) {
+
+		// Pre-command checks use required_thrust_n == 0. Do not require the splay minimum
+		// when validating the hover demand (splay is the mechanism that reaches lower net thrust).
+		if (required_thrust_n > 1e-3f && required_thrust_n > max_thrust_n + 1.f) {
 			_control_solution_valid = false;
 			_control_unreachable_reason = tv3_guidance_status_s::CONTROL_THRUST_ENVELOPE;
 			return false;

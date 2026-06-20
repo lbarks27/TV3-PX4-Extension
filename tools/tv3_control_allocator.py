@@ -8,12 +8,11 @@ torque authority and the SIH plant splay/pitch/yaw thrust model for net thrust.
 from __future__ import annotations
 
 import itertools
+import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
-
-import yaml
 
 REASON_NONE = ""
 REASON_NO_ENGINES = "no engines"
@@ -32,14 +31,16 @@ CONTROL_NO_ACTIVE_ENGINES = 3
 class EngineGeometry:
     position_m: tuple[float, float, float]
     thrust_axis: tuple[float, float, float]
-    pitch_axis: tuple[float, float, float]
+    roll_axis: tuple[float, float, float]
     yaw_axis: tuple[float, float, float]
     thrust_n: float
-    pitch_max_deg: float
+    roll_min_deg: float
+    roll_max_deg: float
+    yaw_min_deg: float
     yaw_max_deg: float
     splay_max_deg: float
     thrust_fraction: float = 1.0
-    pitch_trim: float = 0.0
+    roll_trim: float = 0.0
     yaw_trim: float = 0.0
 
 
@@ -107,44 +108,133 @@ def constrain(value: float, low: float, high: float) -> float:
 
 
 def load_manifest(path: Path | str) -> dict:
-    return yaml.safe_load(Path(path).read_text())
+    return json.loads(Path(path).read_text())
+
+
+BODY_FORWARD_AXIS = (1.0, 0.0, 0.0)
+
+
+def mount_to_origin_axis(position_m: Sequence[float]) -> tuple[float, float, float]:
+    """Unit vector from the engine mount toward the vehicle reference origin."""
+    return normalize((-position_m[0], -position_m[1], -position_m[2]), BODY_FORWARD_AXIS)
+
+
+def outward_radial_axis(position_m: Sequence[float]) -> tuple[float, float, float]:
+    """Unit vector from the origin toward the mount (Y-Z ring placement)."""
+    return normalize((position_m[0], position_m[1], position_m[2]), (0.0, 1.0, 0.0))
+
+
+def roll_axis_perpendicular(
+    thrust_axis: Sequence[float],
+    yaw_axis: Sequence[float],
+) -> tuple[float, float, float]:
+    """Roll axis orthogonal to thrust and yaw; falls back through body +X when degenerate."""
+    for candidate in (
+        cross(thrust_axis, yaw_axis),
+        cross(BODY_FORWARD_AXIS, thrust_axis),
+        cross(BODY_FORWARD_AXIS, yaw_axis),
+        cross(yaw_axis, thrust_axis),
+    ):
+        if norm(candidate) > 1e-6:
+            return normalize(candidate, (0.0, -1.0, 0.0))
+    return (0.0, -1.0, 0.0)
+
+
+def gimbal_axes_from_mount(
+    position_m: Sequence[float],
+    thrust_axis: Sequence[float] | None = None,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Return (roll_axis, yaw_axis) for a mount pose and nominal thrust direction."""
+    thrust = (
+        normalize(thrust_axis, outward_radial_axis(position_m))
+        if thrust_axis is not None
+        else outward_radial_axis(position_m)
+    )
+    yaw = mount_to_origin_axis(position_m)
+    roll = roll_axis_perpendicular(thrust, yaw)
+    return roll, yaw
+
+
+def axes_close(
+    actual: Sequence[float],
+    expected: Sequence[float],
+    *,
+    tolerance: float = 0.02,
+) -> bool:
+    return norm(sub(actual, expected)) <= tolerance
 
 
 def engines_from_vehicle(vehicle: dict) -> list[EngineGeometry]:
+    from tools.tv3_engine_frame import build_engine_frame_axes
+    from tools.tv3_motor_catalog import engine_thrust_n, load_motor_catalog
+
     body = vehicle["vehicle"]
+    motor_selection = vehicle.get("motor_selection", {})
+    catalog = (
+        load_motor_catalog(str(motor_selection["catalog_source"]))
+        if motor_selection.get("catalog_source")
+        else None
+    )
     engines = vehicle.get("propulsion", {}).get("engines")
     if not engines:
         engines = [
             {
                 "position_m": [body["motor_com_x_m"], 0.0, 0.0],
                 "thrust_axis": [1.0, 0.0, 0.0],
-                "pitch_axis": [0.0, -1.0, 0.0],
+                "roll_axis": [0.0, -1.0, 0.0],
                 "yaw_axis": [0.0, 0.0, -1.0],
                 "thrust_fraction": 1.0,
                 "gimbal": {
-                    "pitch_max_deg": body["tvc_max_deg"],
+                    "roll_max_deg": body["tvc_max_deg"],
                     "yaw_max_deg": body["tvc_max_deg"],
                     "splay_max_deg": body["tvc_max_deg"],
                 },
             }
         ]
 
-    return [
-        EngineGeometry(
-            position_m=tuple(engine["position_m"]),
-            thrust_axis=tuple(engine["thrust_axis"]),
-            pitch_axis=tuple(engine["pitch_axis"]),
-            yaw_axis=tuple(engine["yaw_axis"]),
-            thrust_n=body["ca_reference_thrust_n"] * engine.get("thrust_fraction", 1.0 / len(engines)),
-            pitch_max_deg=engine["gimbal"].get("pitch_max_deg", body["tvc_max_deg"]),
-            yaw_max_deg=engine["gimbal"].get("yaw_max_deg", body["tvc_max_deg"]),
-            splay_max_deg=engine["gimbal"].get("splay_max_deg", body["tvc_max_deg"]),
-            thrust_fraction=engine.get("thrust_fraction", 1.0 / len(engines)),
-            pitch_trim=engine["gimbal"].get("pitch_trim", 0.0),
-            yaw_trim=engine["gimbal"].get("yaw_trim", 0.0),
+    is_lander = vehicle.get("variant", {}).get("role") == "three_engine_lander"
+    geometries: list[EngineGeometry] = []
+    for engine in engines:
+        gimbal = engine["gimbal"]
+        position_m = tuple(engine["position_m"])
+        if is_lander:
+            frame = build_engine_frame_axes(position_m)
+            thrust_axis = frame.thrust_axis
+            roll_axis = frame.primary_axis
+            yaw_axis = frame.secondary_axis
+        else:
+            thrust_axis = normalize(engine["thrust_axis"], outward_radial_axis(position_m))
+            manifest_roll = engine.get("roll_axis", engine.get("pitch_axis"))
+            manifest_yaw = engine.get("yaw_axis")
+            if isinstance(manifest_roll, list) and isinstance(manifest_yaw, list):
+                roll_axis = normalize(manifest_roll, (0.0, -1.0, 0.0))
+                yaw_axis = normalize(manifest_yaw, (0.0, 0.0, -1.0))
+            else:
+                roll_axis, yaw_axis = gimbal_axes_from_mount(position_m, thrust_axis)
+        roll_max_deg = float(gimbal.get("roll_max_deg", gimbal.get("pitch_max_deg", body["tvc_max_deg"])))
+        yaw_max_deg = float(gimbal.get("yaw_max_deg", body["tvc_max_deg"]))
+        geometries.append(
+            EngineGeometry(
+                position_m=position_m,
+                thrust_axis=thrust_axis,
+                roll_axis=roll_axis,
+                yaw_axis=yaw_axis,
+                thrust_n=engine_thrust_n(vehicle, engine, catalog=catalog),
+                roll_min_deg=float(gimbal.get("roll_min_deg", gimbal.get("pitch_min_deg", -roll_max_deg))),
+                roll_max_deg=roll_max_deg,
+                yaw_min_deg=float(gimbal.get("yaw_min_deg", -yaw_max_deg)),
+                yaw_max_deg=yaw_max_deg,
+                splay_max_deg=gimbal.get("splay_max_deg", body["tvc_max_deg"]),
+                thrust_fraction=engine.get("thrust_fraction", 1.0 / len(engines)),
+                roll_trim=float(gimbal.get("roll_trim", gimbal.get("pitch_trim", 0.0))),
+                yaw_trim=gimbal.get("yaw_trim", 0.0),
+            )
         )
-        for engine in engines
-    ]
+    return geometries
+
+
+def vehicle_full_thrust_n(vehicle: dict) -> float:
+    return sum(engine.thrust_n for engine in engines_from_vehicle(vehicle))
 
 
 def torque_limits_from_vehicle(vehicle: dict) -> TorqueLimits:
@@ -157,6 +247,11 @@ def torque_limits_from_vehicle(vehicle: dict) -> TorqueLimits:
 
 
 def reference_thrust_from_vehicle(vehicle: dict) -> float:
+    from tools.tv3_motor_catalog import allocator_thrust_fields_from_catalog
+
+    catalog_fields = allocator_thrust_fields_from_catalog(vehicle)
+    if catalog_fields is not None:
+        return float(catalog_fields["ca_reference_thrust_n"])
     return float(vehicle["vehicle"]["ca_reference_thrust_n"])
 
 
@@ -194,14 +289,16 @@ def scaled_engines(
             EngineGeometry(
                 position_m=engine.position_m,
                 thrust_axis=engine.thrust_axis,
-                pitch_axis=engine.pitch_axis,
+                roll_axis=engine.roll_axis,
                 yaw_axis=engine.yaw_axis,
                 thrust_n=engine.thrust_n * thrust_scale,
-                pitch_max_deg=engine.pitch_max_deg,
+                roll_min_deg=engine.roll_min_deg,
+                roll_max_deg=engine.roll_max_deg,
+                yaw_min_deg=engine.yaw_min_deg,
                 yaw_max_deg=engine.yaw_max_deg,
                 splay_max_deg=engine.splay_max_deg,
                 thrust_fraction=engine.thrust_fraction,
-                pitch_trim=engine.pitch_trim,
+                roll_trim=engine.roll_trim,
                 yaw_trim=engine.yaw_trim,
             )
         )
@@ -209,10 +306,8 @@ def scaled_engines(
 
 
 def thrust_envelope(engines: Sequence[EngineGeometry]) -> tuple[float, float]:
-    full_thrust = sum(engine.thrust_n for engine in engines)
-    min_splayed = sum(
-        engine.thrust_n * math.cos(math.radians(engine.splay_max_deg)) for engine in engines
-    )
+    full_thrust = sum(plant_axial_thrust(engine, 0.0, 0.0) for engine in engines)
+    min_splayed = max(0.0, sum(plant_axial_thrust(engine, 0.0, 90.0) for engine in engines))
     return full_thrust, min_splayed
 
 
@@ -234,56 +329,152 @@ def flight_effectiveness_torque(
     )
 
 
+def rotate_about_axis(
+    vector: Sequence[float],
+    axis: Sequence[float],
+    angle_rad: float,
+) -> tuple[float, float, float]:
+    """Rotate *vector* about a unit *axis* (Rodrigues), matching SIH axis-angle thrust."""
+    if abs(angle_rad) <= 1e-12:
+        return tuple(vector)
+    k = normalize(axis, (0.0, 0.0, 1.0))
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    k_dot_v = dot(k, vector)
+    return add(
+        add(scale(vector, cos_a), scale(cross(k, vector), sin_a)),
+        scale(k, k_dot_v * (1.0 - cos_a)),
+    )
+
+
+def coupled_yaw_axis(engine: EngineGeometry, roll_deg: float) -> tuple[float, float, float]:
+    """Yaw hinge axis after roll: yaw is coupled to roll, roll is not coupled to yaw."""
+    total_roll = roll_deg + engine.roll_trim
+    if abs(total_roll) <= 1e-9:
+        return engine.yaw_axis
+    return rotate_about_axis(engine.yaw_axis, engine.roll_axis, math.radians(total_roll))
+
+
+def plant_thrust_direction(
+    engine: EngineGeometry,
+    roll_deg: float,
+    yaw_deg: float,
+) -> tuple[float, float, float]:
+    """Unit thrust direction: roll about fixed roll_axis, then yaw about roll-coupled yaw_axis."""
+    reference = normalize(engine.thrust_axis, (1.0, 0.0, 0.0))
+    total_roll = roll_deg + engine.roll_trim
+    total_yaw = yaw_deg + engine.yaw_trim
+    direction = reference
+    if abs(total_roll) > 1e-9:
+        direction = rotate_about_axis(direction, engine.roll_axis, math.radians(total_roll))
+    if abs(total_yaw) > 1e-9:
+        direction = rotate_about_axis(
+            direction,
+            coupled_yaw_axis(engine, roll_deg),
+            math.radians(total_yaw),
+        )
+    return normalize(direction, reference)
+
+
+def plant_force_vector(
+    engine: EngineGeometry,
+    roll_deg: float,
+    yaw_deg: float,
+) -> tuple[tuple[float, float, float], float]:
+    """Returns body-frame thrust direction and full chamber magnitude after roll and secondary-axis yaw."""
+    direction = plant_thrust_direction(engine, roll_deg, yaw_deg)
+    return direction, engine.thrust_n
+
+
 def plant_torque(
     engine: EngineGeometry,
-    pitch_deg: float,
+    roll_deg: float,
     yaw_deg: float,
-    splay_deg: float,
 ) -> tuple[float, float, float]:
-    """Matches the SIH small-angle thrust-direction model used in tv3_sih."""
-    thrust_axis = normalize(engine.thrust_axis, (1.0, 0.0, 0.0))
-    pitch_axis = normalize(engine.pitch_axis, (0.0, -1.0, 0.0))
-    yaw_axis = normalize(engine.yaw_axis, (0.0, 0.0, -1.0))
-    pitch_rad = math.radians(pitch_deg)
-    yaw_rad = math.radians(yaw_deg)
-    splay_rad = math.radians(splay_deg)
-    direction = thrust_axis
-    direction = add(direction, scale(cross(pitch_axis, thrust_axis), pitch_rad))
-    direction = add(direction, scale(cross(yaw_axis, thrust_axis), yaw_rad))
-    direction = normalize(direction, thrust_axis)
-    force = scale(direction, engine.thrust_n * math.cos(splay_rad))
+    """Matches the SIH thrust-direction model used in tv3_sih."""
+    direction, magnitude = plant_force_vector(engine, roll_deg, yaw_deg)
+    force = scale(direction, magnitude)
     return cross(engine.position_m, force)
 
 
-def plant_thrust(engine: EngineGeometry, splay_deg: float) -> float:
-    return engine.thrust_n * math.cos(math.radians(splay_deg))
+def plant_axial_thrust(engine: EngineGeometry, roll_deg: float, yaw_deg: float) -> float:
+    direction, magnitude = plant_force_vector(engine, roll_deg, yaw_deg)
+    return magnitude * direction[0]
+
+
+def collective_throttle_yaw_deg(
+    desired_net_thrust_n: float,
+    engines: Sequence[EngineGeometry],
+    *,
+    roll_deg: float = 0.0,
+    throttle_max_deg: float | None = None,
+) -> float:
+    """Solve identical secondary-axis yaw (splay) for collective throttle."""
+    if not engines or desired_net_thrust_n <= 0.0:
+        return 0.0
+
+    full_thrust = sum(plant_axial_thrust(engine, roll_deg, 0.0) for engine in engines)
+    if full_thrust < 1e-3 or desired_net_thrust_n >= full_thrust - 1e-3:
+        return 0.0
+
+    yaw_limit = throttle_max_deg
+    if yaw_limit is None:
+        yaw_limit = min(engine.yaw_max_deg for engine in engines)
+
+    low = 0.0
+    high = yaw_limit
+    for _ in range(24):
+        mid = 0.5 * (low + high)
+        net = sum(plant_axial_thrust(engine, roll_deg, mid) for engine in engines)
+        if net > desired_net_thrust_n:
+            low = mid
+        else:
+            high = mid
+
+    return high
+
+
+def collective_splay_deg(
+    desired_net_thrust_n: float,
+    total_chamber_thrust_n: float,
+    splay_max_deg: float,
+) -> float:
+    """Backward-compatible alias: splay is secondary-axis collective yaw."""
+    if total_chamber_thrust_n < 1e-3 or desired_net_thrust_n <= 0.0:
+        return 0.0
+    if desired_net_thrust_n >= total_chamber_thrust_n - 1e-3:
+        return 0.0
+    ratio = max(0.0, min(1.0, desired_net_thrust_n / total_chamber_thrust_n))
+    return max(0.0, min(splay_max_deg, math.degrees(math.acos(ratio))))
 
 
 def command_grid(engine: EngineGeometry, steps: int) -> list[tuple[float, float, float]]:
-    def values(limit: float) -> list[float]:
-        if steps <= 1 or limit <= 0:
-            return [0.0]
-        return [-limit, 0.0, limit]
+    def span_values(low: float, high: float) -> list[float]:
+        if steps <= 1 or abs(high - low) <= 1e-6:
+            return [constrain(0.0, low, high)]
+        if low <= 0.0 <= high:
+            return [low, 0.0, high]
+        midpoint = 0.5 * (low + high)
+        return [low, midpoint, high]
 
-    splay_values = [0.0, engine.splay_max_deg]
     return [
-        (pitch, yaw, splay)
-        for pitch in values(engine.pitch_max_deg)
-        for yaw in values(engine.yaw_max_deg)
-        for splay in splay_values
+        (roll, yaw)
+        for roll in span_values(engine.roll_min_deg, engine.roll_max_deg)
+        for yaw in span_values(engine.yaw_min_deg, engine.yaw_max_deg)
     ]
 
 
 def _command_saturated(
     engine: EngineGeometry,
-    command: tuple[float, float, float],
+    command: tuple[float, float],
     epsilon: float = 1e-3,
 ) -> bool:
-    pitch, yaw, splay = command
+    roll, yaw = command
     return (
-        abs(abs(pitch) - engine.pitch_max_deg) <= epsilon
-        or abs(abs(yaw) - engine.yaw_max_deg) <= epsilon
-        or abs(abs(splay) - engine.splay_max_deg) <= epsilon
+        abs(roll - engine.roll_min_deg) <= epsilon
+        or abs(roll - engine.roll_max_deg) <= epsilon
+        or abs(yaw - engine.yaw_min_deg) <= epsilon
+        or abs(yaw - engine.yaw_max_deg) <= epsilon
     )
 
 
@@ -349,9 +540,9 @@ def allocate(
         thrust = 0.0
         saturated = False
         for engine, command in zip(working, commands):
-            pitch, yaw, splay = command
-            torque = add(torque, plant_torque(engine, pitch, yaw, splay))
-            thrust += plant_thrust(engine, splay)
+            roll, yaw = command
+            torque = add(torque, plant_torque(engine, roll, yaw))
+            thrust += plant_axial_thrust(engine, roll, yaw)
             saturated = saturated or _command_saturated(engine, command)
 
         torque_error = norm(sub(torque, desired))
@@ -421,13 +612,20 @@ def motor_reference_from_thrust(
     if len(scales) < engine_count:
         scales.extend([1.0] * (engine_count - len(scales)))
 
+    from tools.tv3_motor_catalog import engine_thrust_n, load_motor_catalog
+
+    motor_selection = vehicle.get("motor_selection", {})
+    catalog = (
+        load_motor_catalog(str(motor_selection["catalog_source"]))
+        if motor_selection.get("catalog_source")
+        else None
+    )
+
     per_engine = [0.0, 0.0, 0.0, 0.0]
     total = 0.0
-    reference = float(vehicle["vehicle"]["ca_reference_thrust_n"])
     for index, engine in enumerate(engines[:engine_count]):
         if mask & (1 << index):
-            fraction = engine.get("thrust_fraction", 1.0 / max(engine_count, 1))
-            thrust = reference * fraction * max(scales[index], 0.0)
+            thrust = engine_thrust_n(vehicle, engine, catalog=catalog) * max(scales[index], 0.0)
             per_engine[index] = thrust
             total += thrust
 
@@ -516,8 +714,8 @@ def guidance_reachability(
     if result.reachable:
         return result
 
-    max_thrust, min_thrust = thrust_envelope_from_reference(manifest, motor_reference)
-    if required_thrust_n > max_thrust + 1e-3 or required_thrust_n < min_thrust - 1e-3:
+    max_thrust, _min_thrust = thrust_envelope_from_reference(manifest, motor_reference)
+    if required_thrust_n > 1e-3 and required_thrust_n > max_thrust + 1e-3:
         result.reason = REASON_THRUST_ENVELOPE
         result.control_unreachable_reason = CONTROL_THRUST_ENVELOPE
     elif motor_reference.active_mask == 0:
@@ -540,7 +738,7 @@ def flight_plant_torque_agreement(
         max_angle_deg=max_angle_deg,
         reference_thrust_n=reference_thrust_n,
     )
-    if axis == engine.pitch_axis:
+    if axis == engine.roll_axis:
         plant = plant_torque(engine, max_angle_deg, 0.0, 0.0)
     else:
         plant = plant_torque(engine, 0.0, max_angle_deg, 0.0)

@@ -12,9 +12,9 @@ This repo supports a PX4-first data path for detailed SITL, flight, and ground-t
 | Use case | Tool | Entry point |
 |----------|------|-------------|
 | Live SITL 3D pose | **Hawkeye** | `./scripts/run_hawkeye.sh` |
-| Interactive 3D spatial review (no timeline) | **PyVista** | `./scripts/view_vehicle_frame.sh`, `./scripts/plot_ulog_replay.sh`, `./scripts/plot_ulog_engines.sh` |
-| Timed log playback (scrubbable timeline) | **Rerun** | replay scripts with `--rerun` |
-| Static PNG export | **PyVista** | replay/vehicle scripts with `-o *.png` or `--save` |
+| Interactive 3D spatial review (no timeline) | **PyVista** | `./scripts/view_vehicle_frame.sh`, `./scripts/tv3_replay.sh` |
+| Timed log playback (scrubbable timeline) | **Rerun** | `./scripts/tv3_replay.sh --latest --scene trajectory` (or `engines`, `guidance`, `all`) |
+| Static PNG export | **PyVista** | `./scripts/tv3_replay.sh -o *.png` or `view_vehicle_frame.sh --save` |
 | Static 2D ULog timeseries review | **Matplotlib** | `./scripts/plot_ulog.sh` |
 
 Hawkeye is a live UDP viewer only (port `19410`). PyVista opens an interactive 3D window you can orbit and zoom — it shows a single snapshot in time (pick with `--time`), not a scrubber. Rerun is for full timed playback across the log. Use `-o file.png` when you need a headless snapshot for reports or CI.
@@ -29,7 +29,9 @@ Run once before any plotting or replay:
 
 This creates or updates `../.work/tv3-viz-venv`, which avoids installing packages into Homebrew's externally managed Python.
 
-**Always use the repo shell wrappers** (`./scripts/plot_ulog.sh`, `./scripts/plot_ulog_replay.sh`, etc.). They activate the viz venv and prepend its `bin/` directory to `PATH` so the Rerun viewer executable is found. Calling `python3 tools/...` directly will fail with missing `pyvista` / `rerun-sdk` unless you manage the venv yourself.
+**Always use the repo shell wrappers** (`./scripts/plot_ulog.sh`, `./scripts/tv3_replay.sh`, etc.). They activate the viz venv and prepend its `bin/` directory to `PATH` so the Rerun viewer executable is found. Calling `python3 tools/...` directly will fail with missing `pyvista` / `rerun-sdk` unless you manage the venv yourself.
+
+`plot_ulog_replay.sh` and `plot_ulog_engines.sh` remain as deprecated aliases forwarding to `tv3_replay.sh`.
 
 Headless smoke test (no GUI windows):
 
@@ -165,9 +167,12 @@ Use Rerun when you want to scrub through time. Guidance metrics are Rerun-only (
 
 ```bash
 ./scripts/plot_ulog_replay.sh --latest --rerun
+./scripts/plot_ulog_replay.sh --latest --scene all -o /tmp/tv3_unified.rrd
 ./scripts/plot_ulog_replay.sh --latest --scene guidance
 ./scripts/plot_ulog_engines.sh --latest --rerun
 ```
+
+`--scene all` writes one Rerun recording with trajectory, per-engine thrust, and guidance metrics on a shared `sim_time` timeline (seconds from log start).
 
 Save a recording for offline review (headless, no viewer window):
 
@@ -233,6 +238,8 @@ If a panel says a topic is missing, the log was probably recorded before the TV3
 | `gRPC has been unable to connect` with `--rerun` | Same as above — viewer binary was not found |
 | PyVista window does not appear | You passed `-o *.png` (headless export) — omit `-o` for interactive |
 | Guidance PNG rejected | Expected — guidance is Rerun-only; use `--rerun` or `-o file.rrd` |
+| Rerun flight lasts ~50 ms | Select the **`sim_time`** timeline in the time panel — not `log_time` (wall-clock export time) |
+| Rerun playback looks choppy | Default replay uses native ULog rate (~50 Hz). Use `--fps 10` only if you want a lighter `.rrd` |
 | `ULog not found` with `--latest` | Run SITL first so logs land under `logs/sim/`, or pass an explicit `.ulg` path |
 
 ## SIH Ground-Truth Topics

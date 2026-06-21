@@ -34,12 +34,12 @@ Vehicle manifests and flight profiles are JSON under `config/vehicles/*.json` an
 # Automated Phase 1 gate (headless, archives ULog, runs review):
 ./scripts/check_hover_window.sh
 
-# Review the newest archived run (see docs/data_visualization.md for the full stack):
-./scripts/setup_viz_env.sh        # once
-./scripts/validate_viz_commands.sh  # optional headless smoke test
-./scripts/plot_ulog.sh --latest            # 2D timeseries PNG
-./scripts/plot_ulog_replay.sh --latest     # interactive 3D trajectory (PyVista)
-./scripts/plot_ulog_replay.sh --latest --rerun  # timed playback (Rerun)
+# Review the newest archived run (full tool matrix: docs/data_visualization.md):
+./scripts/setup_python_env.sh --profile viz   # once
+./scripts/validate_viz_commands.sh            # optional headless smoke test
+./scripts/plot_ulog.sh --latest               # 2D timeseries PNG
+./scripts/tv3_replay.sh --latest              # interactive 3D trajectory (PyVista)
+./scripts/tv3_replay.sh --latest --rerun      # timed playback (Rerun)
 ```
 
 Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_v1.json`. Load a scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/single_engine_ascent.json`.
@@ -60,10 +60,10 @@ Those are also the defaults, so `./scripts/run_sitl_sih.sh` is enough for the cu
 
 ```bash
 ./scripts/bootstrap_px4.sh
-./scripts/build_sih.sh
+./scripts/build_px4.sh --target sih
 ```
 
-`build_sih.sh` prepares `../.work/px4-tv3`, points `EXTERNAL_MODULES_LOCATION` at the no-space symlink `../.work/tv3-px4-extension`, and builds `px4_sitl_default` with the external `tv3_sih` module.
+`build_px4.sh --target sih` prepares `../.work/px4-tv3`, points `EXTERNAL_MODULES_LOCATION` at the no-space symlink `../.work/tv3-px4-extension`, and builds `px4_sitl_default` with the external `tv3_sih` module.
 
 ## Run
 
@@ -75,6 +75,7 @@ The launcher sets:
 
 - `PX4_SIMULATOR=sihsim`
 - `PX4_SIM_MODEL=tv3_lander`
+- `PX4_SIM_SPEED_FACTOR=1` (real-time lockstep; do not raise for routine runs)
 - `PX4_SYS_AUTOSTART=11002`
 - `TV3_VEHICLE_CONFIG=config/vehicles/tv3_lander_v1.json`
 - `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_hover_window.json`

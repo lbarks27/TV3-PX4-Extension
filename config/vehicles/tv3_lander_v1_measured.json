@@ -1,0 +1,27 @@
+{
+  "data_status": {
+    "flight_ready": false,
+    "summary": "Phase 2 physical-model intake: CAD-derived preliminary masses, engine layout, splay limits, and load-cell channel map populated; measured bench data still required before flight_ready.",
+    "fields": {
+      "vehicle.body_mass_kg": "preliminary",
+      "vehicle.body_com_x_m": "preliminary",
+      "vehicle.motor_com_x_m": "preliminary",
+      "vehicle.motor_loaded_mass_kg": "preliminary",
+      "vehicle.motor_dry_mass_kg": "preliminary",
+      "vehicle.rail_length_m": "preliminary",
+      "vehicle.torque_limits_nm": "preliminary",
+      "vehicle.tvc_max_deg": "preliminary",
+      "vehicle.tvc_slew_dps": "preliminary",
+      "hardware.load_cell.calibration": "placeholder",
+      "hardware.load_cell.channels": "placeholder",
+      "hardware.load_cell.noise_counts_rms": "placeholder",
+      "physical_model.assemblies": "preliminary",
+      "physical_model.links": "preliminary",
+      "physical_model.joints": "preliminary",
+      "propulsion.engines": "preliminary",
+      "propulsion.engines.position_m": "preliminary",
+      "propulsion.engines.gimbal": "placeholder",
+      "propulsion.engines.gimbal.backlash_deg": "placeholder"
+    }
+  }
+}

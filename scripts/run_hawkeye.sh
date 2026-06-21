@@ -2,8 +2,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 PORT="${HAWKEYE_UDP_PORT:-19410}"
-MESH="${TV3_HAWKEYE_MESH:-/Users/liambarkley/Downloads/TV3+Hub+Test+1.obj}"
+MESH="${TV3_HAWKEYE_MESH:-${REPO_ROOT}/assets/meshes/tv3_lander_v1.obj}"
+export TV3_HAWKEYE_MESH_ROT="${TV3_HAWKEYE_MESH_ROT:-tv3_manifest}"
 # Fixed-wing slot: mirror_axes=0 (full mesh). Multicopter slots mirror quarter meshes.
 HAWKEYE_ARGS="${TV3_HAWKEYE_ARGS:--fw}"
 

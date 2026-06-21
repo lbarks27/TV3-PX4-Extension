@@ -73,8 +73,7 @@ ScrollCallback = Callable[[Any], None]
 KeyCallback = Callable[[Any], None]
 
 
-def load_manifest(path: Path) -> dict:
-    return json.loads(path.read_text())
+from tools.manifest_io import load_manifest
 
 
 def resolve_manifest(ulog_path: Path, vehicle_path: Path | None) -> dict:
@@ -119,24 +118,93 @@ def interpolate_series(times_us: np.ndarray, values: np.ndarray, query_us: np.nd
     return np.vstack([np.interp(query_us, times_us, row) for row in values])
 
 
+def topic_sample_rate_hz(dataset) -> float | None:
+    if dataset is None:
+        return None
+    times = topic_times_us(dataset)
+    if len(times) < 2:
+        return None
+    deltas_us = np.diff(times)
+    deltas_us = deltas_us[deltas_us > 0]
+    if deltas_us.size == 0:
+        return None
+    return 1e6 / float(np.median(deltas_us))
+
+
+def fastest_dataset(datasets: Sequence) -> object | None:
+    best = None
+    best_hz = -1.0
+    for dataset in datasets:
+        rate_hz = topic_sample_rate_hz(dataset)
+        if rate_hz is None or rate_hz <= best_hz:
+            continue
+        best_hz = rate_hz
+        best = dataset
+    return best
+
+
+def infer_replay_fps(datasets: Sequence, *, cap_hz: float = 50.0) -> float:
+    """Pick a replay sample rate from the fastest topic in the provided datasets."""
+    rate_hz = topic_sample_rate_hz(fastest_dataset(datasets))
+    if rate_hz is None:
+        return 20.0
+    return min(rate_hz, cap_hz)
+
+
+def resolve_replay_fps(fps: float, datasets: Sequence) -> float:
+    """`fps <= 0` selects the native fastest-topic rate (typically 50 Hz for TV3 SIH logs)."""
+    if fps > 0:
+        return fps
+    return infer_replay_fps(datasets)
+
+
 def build_query_times(datasets: Sequence, *, fps: float, stride: int) -> tuple[float, np.ndarray]:
-    """Return (start_us, query_us) spanning all provided datasets."""
+    """Return (start_us, query_us) spanning all provided datasets.
+
+    When `fps <= 0`, reuse the fastest topic's native timestamps instead of
+    downsampling to a fixed 10 Hz grid.
+    """
+    active = [dataset for dataset in datasets if dataset is not None]
+    if not active:
+        raise SystemExit("no datasets available to build replay timeline")
+
+    stride = max(stride, 1)
+    if fps <= 0:
+        master = fastest_dataset(active)
+        if master is not None:
+            times = topic_times_us(master)
+            start_us = float(times[0])
+            query_us = times[::stride]
+            return start_us, query_us
+
     starts = []
     ends = []
-    for dataset in datasets:
-        if dataset is None:
-            continue
+    for dataset in active:
         times = topic_times_us(dataset)
         starts.append(float(times[0]))
         ends.append(float(times[-1]))
-    if not starts:
-        raise SystemExit("no datasets available to build replay timeline")
     start_us = min(starts)
     end_us = max(ends)
     duration_s = max((end_us - start_us) * 1e-6, 1e-3)
-    frame_count = max(int(duration_s * fps), 1)
-    query_us = np.linspace(start_us, end_us, frame_count)[:: max(stride, 1)]
+    effective_fps = resolve_replay_fps(fps, active)
+    frame_count = max(int(duration_s * effective_fps), 1)
+    query_us = np.linspace(start_us, end_us, frame_count)[::stride]
     return start_us, query_us
+
+
+def replay_frame_stats(start_us: float, query_us: np.ndarray, *, fps: float, datasets: Sequence) -> dict[str, float | int | bool]:
+    span_s = max((float(query_us[-1]) - float(query_us[0])) * 1e-6, 0.0) if query_us.size else 0.0
+    if query_us.size > 1 and span_s > 0:
+        effective_hz = (query_us.size - 1) / span_s
+    else:
+        effective_hz = resolve_replay_fps(fps, datasets)
+    return {
+        "frames": int(query_us.size),
+        "span_s": span_s,
+        "effective_hz": float(effective_hz),
+        "native_timestamps": fps <= 0,
+        "requested_fps": float(fps),
+    }
 
 
 def rotation_matrix_from_quat(quat: Sequence[float]) -> np.ndarray:
@@ -189,6 +257,18 @@ def frame_index_at_time(frames: Sequence[Any], time_s: float) -> int:
     return min(range(len(frames)), key=lambda index: abs(frames[index].time_s - time_s))
 
 
+def format_replay_sampling(frames: Sequence[Any], *, fps: float) -> str:
+    if not frames:
+        return "replay: no frames"
+    span_s = float(frames[-1].time_s - frames[0].time_s)
+    if len(frames) > 1 and span_s > 0:
+        effective_hz = (len(frames) - 1) / span_s
+    else:
+        effective_hz = 0.0
+    mode = "native ULog timestamps" if fps <= 0 else f"resampled at {fps:g} Hz"
+    return f"replay: {len(frames)} frames over {span_s:.1f} s ({effective_hz:.1f} Hz effective, {mode})"
+
+
 def scalar_series_or_zeros(dataset, field_name: str, times_us: np.ndarray) -> np.ndarray:
     values = topic_field(dataset, field_name) if dataset is not None else None
     if values is None:
@@ -210,13 +290,19 @@ __all__ = [
     "build_query_times",
     "euler_angles_deg",
     "find_latest_ulog",
+    "fastest_dataset",
+    "format_replay_sampling",
     "frame_index_at_time",
     "import_ulog",
+    "infer_replay_fps",
     "interpolate_series",
     "load_manifest",
     "ned_to_plot_xyz",
     "resolve_manifest",
+    "resolve_replay_fps",
+    "replay_frame_stats",
     "rotation_matrix_from_quat",
+    "topic_sample_rate_hz",
     "scalar_series_or_zeros",
     "topic_dataset",
     "topic_field",

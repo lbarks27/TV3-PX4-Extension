@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 #
-# Run the TV3 ULog engine replay animator with the repo-managed viz Python environment.
+# Deprecated — use ./scripts/tv3_replay.sh --scene engines instead.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=scripts/viz_env.sh
-source "${SCRIPT_DIR}/viz_env.sh"
-
-exec "${PYTHON}" "${REPO_ROOT}/tools/plot_ulog_engines.py" "$@"
+echo "note: plot_ulog_engines.sh is deprecated; use ./scripts/tv3_replay.sh --scene engines" >&2
+exec "${SCRIPT_DIR}/tv3_replay.sh" --scene engines "$@"

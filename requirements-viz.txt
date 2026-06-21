@@ -1,4 +1,4 @@
-rerun-sdk>=0.22
+rerun-sdk==0.22.0
 pyvista>=0.44
 matplotlib>=3.8
 pyulog>=1.2.2

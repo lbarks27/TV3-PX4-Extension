@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
 import re
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,13 +9,7 @@ from tempfile import TemporaryDirectory
 import json
 
 
-def load_module(path: Path):
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from tests.support import load_module
 
 
 def generated_params_path(output: Path, vehicle_name: str = "tv3_v1") -> Path:
@@ -247,7 +239,7 @@ class VehicleAssetTests(unittest.TestCase):
         reachable = allocator.allocate(engines, (0.0, 0.0, 0.0), hover_thrust_n)
         self.assertTrue(reachable.reachable, reachable)
 
-        unreachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 40.0)
+        unreachable = allocator.allocate(engines, (0.0, 0.0, 0.0), 95.0)
         self.assertFalse(unreachable.reachable)
         self.assertEqual(allocator.REASON_THRUST_ENVELOPE, unreachable.reason)
 

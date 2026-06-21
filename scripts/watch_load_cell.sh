@@ -8,10 +8,7 @@ VENV="${REPO_ROOT}/.venv-bench"
 
 cd "${REPO_ROOT}"
 
-if [ ! -d "${VENV}" ]; then
-	python3 -m venv "${VENV}"
-	"${VENV}/bin/pip" install -q -r "${REPO_ROOT}/requirements-bench.txt"
-fi
+"${SCRIPT_DIR}/setup_python_env.sh" --profile bench >/dev/null
 
 CONNECT="${TV3_MAVLINK_CONNECT:-/dev/cu.usbmodem01}"
 

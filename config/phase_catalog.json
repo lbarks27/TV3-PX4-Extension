@@ -1,0 +1,60 @@
+{
+  "schema": "tv3_phase_catalog_v1",
+  "phases": [
+    {
+      "id": "0",
+      "title": "Stabilize SIH Baseline",
+      "goal": "Make the active simulator boring to build and easy to reproduce.",
+      "gate_script": "scripts/check_barebones.sh",
+      "gate_profile": "fast"
+    },
+    {
+      "id": "1",
+      "title": "Prove Lander Hover Window",
+      "goal": "Validate the first required lander scenario in SIH before expanding scope.",
+      "gate_script": "scripts/check_hover_window.sh",
+      "gate_profile": "slow",
+      "profile_hint": "lander_hover_window"
+    },
+    {
+      "id": "2",
+      "title": "Replace Provisional Physical Data",
+      "goal": "Manifests represent the real vehicles closely enough for simulation and control design.",
+      "gate_script": "scripts/check_physical_manifests.sh",
+      "gate_profile": "fast"
+    },
+    {
+      "id": "3",
+      "title": "Propulsion And Load-Cell Semantics",
+      "goal": "Flight software sees motor state the same way in SIH, bench tests, and flight.",
+      "gate_script": "scripts/check_propulsion_semantics.sh",
+      "gate_profile": "fast"
+    },
+    {
+      "id": "4",
+      "title": "Control Mixer",
+      "goal": "Requested torque and net thrust become reachable, bounded engine commands.",
+      "gate_script": "scripts/check_control_mixer.sh",
+      "gate_profile": "fast"
+    },
+    {
+      "id": "5",
+      "title": "Guidance And Monte Carlo",
+      "goal": "Guidance only claims a solution when the remaining vehicle envelope can execute it.",
+      "gate_script": "scripts/check_guidance_monte_carlo.sh",
+      "gate_profile": "fast"
+    },
+    {
+      "id": "6",
+      "title": "Bench And Hardware Gates",
+      "goal": "Real sensors and outputs behave like the simulated interfaces.",
+      "gate_script": null,
+      "gate_profile": "manual"
+    }
+  ],
+  "flight_gates": [
+    {"id": "A", "title": "tv3_v1 single-engine ascent free flight", "vehicle": "tv3_v1"},
+    {"id": "B", "title": "tv3_lander_v1 restrained/tethered lander tests", "vehicle": "tv3_lander_v1"},
+    {"id": "C", "title": "tv3_lander_v1 waypoint and landing flight", "vehicle": "tv3_lander_v1"}
+  ]
+}

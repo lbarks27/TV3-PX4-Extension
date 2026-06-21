@@ -15,6 +15,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATUS_PATH = REPO_ROOT / "config/completion_status.json"
+PHASE_CATALOG_PATH = REPO_ROOT / "config/phase_catalog.json"
 STATUS_DOC_PATH = REPO_ROOT / "docs/completion_status.md"
 VEHICLE_DIR = REPO_ROOT / "config/vehicles"
 GROUND_LOG_DIR = REPO_ROOT / "logs/ground"
@@ -24,64 +25,14 @@ PX4_SITL_BIN = REPO_ROOT.parent / ".work/px4-tv3/build/px4_sitl_default/bin/px4"
 STATUS_VALUES = ("not_started", "in_progress", "structural", "verified", "blocked")
 GATE_RESULTS = ("unknown", "pass", "fail", "skipped")
 
-PHASE_DEFINITIONS: tuple[dict[str, Any], ...] = (
-    {
-        "id": "0",
-        "title": "Stabilize SIH Baseline",
-        "goal": "Make the active simulator boring to build and easy to reproduce.",
-        "gate_script": "scripts/check_barebones.sh",
-        "gate_profile": "fast",
-    },
-    {
-        "id": "1",
-        "title": "Prove Lander Hover Window",
-        "goal": "Validate the first required lander scenario in SIH before expanding scope.",
-        "gate_script": "scripts/check_hover_window.sh",
-        "gate_profile": "slow",
-        "profile_hint": "lander_hover_window",
-    },
-    {
-        "id": "2",
-        "title": "Replace Provisional Physical Data",
-        "goal": "Manifests represent the real vehicles closely enough for simulation and control design.",
-        "gate_script": "scripts/check_physical_manifests.sh",
-        "gate_profile": "fast",
-    },
-    {
-        "id": "3",
-        "title": "Propulsion And Load-Cell Semantics",
-        "goal": "Flight software sees motor state the same way in SIH, bench tests, and flight.",
-        "gate_script": "scripts/check_propulsion_semantics.sh",
-        "gate_profile": "fast",
-    },
-    {
-        "id": "4",
-        "title": "Control Mixer",
-        "goal": "Requested torque and net thrust become reachable, bounded engine commands.",
-        "gate_script": "scripts/check_control_mixer.sh",
-        "gate_profile": "fast",
-    },
-    {
-        "id": "5",
-        "title": "Guidance And Monte Carlo",
-        "goal": "Guidance only claims a solution when the remaining vehicle envelope can execute it.",
-        "gate_script": "scripts/check_guidance_monte_carlo.sh",
-        "gate_profile": "fast",
-    },
-    {
-        "id": "6",
-        "title": "Bench And Hardware Gates",
-        "goal": "Real sensors and outputs behave like the simulated interfaces.",
-        "gate_script": None,
-        "gate_profile": "manual",
-    },
-)
 
-FLIGHT_GATE_DEFINITIONS: tuple[dict[str, str], ...] = (
-    {"id": "A", "title": "tv3_v1 single-engine ascent free flight", "vehicle": "tv3_v1"},
-    {"id": "B", "title": "tv3_lander_v1 restrained/tethered lander tests", "vehicle": "tv3_lander_v1"},
-    {"id": "C", "title": "tv3_lander_v1 waypoint and landing flight", "vehicle": "tv3_lander_v1"},
-)
+def load_phase_catalog() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    catalog = load_json(PHASE_CATALOG_PATH)
+    phases = catalog.get("phases", [])
+    flight_gates = catalog.get("flight_gates", [])
+    if not phases:
+        raise ValueError(f"phase catalog missing phases: {PHASE_CATALOG_PATH}")
+    return phases, flight_gates
 
 
 @dataclass
@@ -111,6 +62,9 @@ def load_json(path: Path) -> dict[str, Any]:
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+PHASE_DEFINITIONS, FLIGHT_GATE_DEFINITIONS = load_phase_catalog()
 
 
 def default_status() -> dict[str, Any]:

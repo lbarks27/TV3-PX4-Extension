@@ -61,7 +61,7 @@
       "action": "launch"
     }
   ],
-  "review": {
+    "review": {
     "required_topics": [
       "tv3_guidance_status",
       "trajectory_setpoint",
@@ -75,5 +75,48 @@
       "landing approach begins only with sufficient landing_twr",
       "final log includes guidance phase, waypoint index, and vehicle position"
     ]
+  },
+  "viz_profile": {
+    "description": "Waypoint track tuned for Hawkeye/Rerun visualization review with larger lateral excursions.",
+    "guidance": {
+      "takeoff_alt_m": 8.0,
+      "apex_alt_m": 25.0,
+      "pos_p": 0.12,
+      "vel_max_m_s": 8.0,
+      "vel_up_m_s": 5.0,
+      "vel_dn_m_s": 3.5,
+      "hold_alt_m": 8.0,
+      "acceptance_m": 4.0,
+      "min_twr": 1.1,
+      "landing_twr": 1.2,
+      "wp1_n_m": 25.0,
+      "wp1_e_m": 12.0,
+      "wp1_d_m": -12.0,
+      "wp2_n_m": 10.0,
+      "wp2_e_m": -18.0,
+      "wp2_d_m": -18.0,
+      "wp2_mode": "position_hold",
+      "wp2_hold_s": 5.0,
+      "wp3_n_m": -15.0,
+      "wp3_e_m": 8.0,
+      "wp3_d_m": -10.0,
+      "sim_groundtruth_fallback": 1
+    },
+    "review": {
+      "required_topics": [
+        "tv3_guidance_status",
+        "trajectory_setpoint",
+        "vehicle_local_position",
+        "vehicle_local_position_groundtruth",
+        "tv3_engine_state",
+        "control_allocator_status",
+        "actuator_motors"
+      ],
+      "success_criteria": [
+        "guidance produces non-zero lateral and turning setpoints",
+        "engine splay/gimbal commands vary visibly across engines during turns",
+        "vehicle follows waypoints with reasonable error before descent"
+      ]
+    }
   }
 }

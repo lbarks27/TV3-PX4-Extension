@@ -107,12 +107,11 @@ LOGGER_TOPICS = [
 ]
 
 
+from tools.manifest_io import load_manifest as load_vehicle_manifest
+
+
 def load_vehicle(path: Path) -> dict:
-    with path.open() as stream:
-        vehicle = json.load(stream)
-    if not isinstance(vehicle, dict):
-        raise ValueError(f"vehicle config must be a JSON object: {path}")
-    return vehicle
+    return load_vehicle_manifest(path)
 
 
 def load_flight_profile(path: Path) -> dict:
@@ -121,6 +120,28 @@ def load_flight_profile(path: Path) -> dict:
     if not isinstance(profile, dict):
         raise ValueError(f"flight profile must be a JSON object: {path}")
     return profile
+
+
+def resolve_flight_profile(path: Path) -> dict:
+    profile = load_flight_profile(path)
+    extends = profile.get("extends")
+    if not extends:
+        return profile
+    base_path = Path(extends)
+    if not base_path.is_absolute():
+        base_path = (path.parent / base_path).resolve()
+    base = resolve_flight_profile(base_path)
+    merged = deepcopy(base)
+    for key, value in profile.items():
+        if key == "extends":
+            continue
+        if key == "guidance" and isinstance(value, dict):
+            merged_guidance = dict(merged.get("guidance", {}))
+            merged_guidance.update(value)
+            merged[key] = merged_guidance
+        else:
+            merged[key] = value
+    return merged
 
 
 def repo_display_path(path: Path) -> str:
@@ -581,7 +602,7 @@ def write_runtime_assets(vehicle: dict, path: Path) -> None:
 def generate_assets(vehicle_path: Path, output_root: Path, flight_profile_path: Path | None = None) -> None:
     vehicle = load_vehicle(vehicle_path)
     if flight_profile_path is not None:
-        vehicle = apply_flight_profile(vehicle, load_flight_profile(flight_profile_path), flight_profile_path)
+        vehicle = apply_flight_profile(vehicle, resolve_flight_profile(flight_profile_path), flight_profile_path)
     validate_vehicle(vehicle, vehicle_path)
     write_runtime_assets(vehicle, output_root / "runtime")
 

@@ -107,9 +107,7 @@ def constrain(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def load_manifest(path: Path | str) -> dict:
-    return json.loads(Path(path).read_text())
-
+from tools.manifest_io import load_manifest
 
 BODY_FORWARD_AXIS = (1.0, 0.0, 0.0)
 
@@ -743,3 +741,22 @@ def flight_plant_torque_agreement(
     else:
         plant = plant_torque(engine, 0.0, max_angle_deg, 0.0)
     return flight, plant
+
+
+def _allocator_cli() -> None:
+    import argparse
+    from dataclasses import asdict
+
+    parser = argparse.ArgumentParser(description="TV3 allocator reachability check")
+    parser.add_argument("--vehicle", type=Path, required=True)
+    parser.add_argument("--torque", nargs=3, type=float, default=(0.0, 0.0, 0.0))
+    parser.add_argument("--thrust", type=float, required=True)
+    args = parser.parse_args()
+
+    result = allocate_from_vehicle(args.vehicle, tuple(args.torque), args.thrust)
+    payload = asdict(result)
+    print(json.dumps(payload, indent=2, default=list))
+
+
+if __name__ == "__main__":
+    _allocator_cli()

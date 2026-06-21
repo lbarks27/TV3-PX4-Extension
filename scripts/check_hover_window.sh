@@ -4,20 +4,16 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+# shellcheck source=scripts/_gate_common.sh
+source "${SCRIPT_DIR}/_gate_common.sh"
 
 export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.json}"
 export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.json}"
 
 cd "${REPO_ROOT}"
 
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
-
-OUTPUT_ROOT="${REPO_ROOT}/build/hover_window"
-rm -rf "${OUTPUT_ROOT}"
-./tools/generate_vehicle_assets.py \
-	--vehicle "${TV3_VEHICLE_CONFIG}" \
-	--flight-profile "${TV3_FLIGHT_PROFILE}" \
-	--output "${OUTPUT_ROOT}"
+gate_run_tests
+gate_generate_assets "${TV3_VEHICLE_CONFIG}" "${REPO_ROOT}/build/hover_window" "${TV3_FLIGHT_PROFILE}"
 
 TV3_REUSE_PX4_WORKTREE=1 ./scripts/build_sih.sh
 

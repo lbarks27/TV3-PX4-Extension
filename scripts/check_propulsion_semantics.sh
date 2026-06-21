@@ -7,7 +7,7 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 
 cd "${REPO_ROOT}"
 
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+"${SCRIPT_DIR}/run_tests.sh"
 
 if [ ! -f "${REPO_ROOT}/docs/templates/bench_calibration_report.md" ]; then
 	printf 'missing bench calibration template\n' >&2

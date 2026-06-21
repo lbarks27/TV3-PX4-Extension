@@ -595,8 +595,7 @@ def motor_reference_from_manifest(manifest: dict, *, thrust_n: float, ignition_m
     )
 
 
-def load_manifest(path: Path | str) -> dict:
-    return json.loads(Path(path).read_text())
+from tools.manifest_io import load_manifest
 
 
 def thrust_n_from_adc_raw(raw_count: int, config: LoadCellConfig) -> float:

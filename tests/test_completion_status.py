@@ -2,19 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-
-def load_module(path: Path):
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from tests.support import load_module
 
 
 class CompletionStatusTests(unittest.TestCase):

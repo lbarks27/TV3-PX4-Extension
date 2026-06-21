@@ -10,6 +10,8 @@ export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.j
 export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.json}"
 export PX4_SIMULATOR="${PX4_SIMULATOR:-sihsim}"
 export PX4_SIM_MODEL="${PX4_SIM_MODEL:-tv3_lander}"
+# 1x lockstep: sim seconds advance at the same rate as wall clock.
+export PX4_SIM_SPEED_FACTOR="${PX4_SIM_SPEED_FACTOR:-1}"
 export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-11002}"
 export HAWKEYE_UDP_PORT="${HAWKEYE_UDP_PORT:-19410}"
 # Hawkeye 0.3.x maps unknown MAV_TYPE values (including TV3's MAV_TYPE_ROCKET=9)
@@ -114,6 +116,7 @@ echo "vehicle:            ${TV3_VEHICLE_CONFIG}"
 echo "profile:            ${TV3_FLIGHT_PROFILE}"
 echo "PX4_SIMULATOR:      ${PX4_SIMULATOR}"
 echo "PX4_SIM_MODEL:      ${PX4_SIM_MODEL}"
+echo "PX4_SIM_SPEED:      ${PX4_SIM_SPEED_FACTOR}x (1 = real-time lockstep)"
 echo "PX4_SYS_AUTOSTART:  ${PX4_SYS_AUTOSTART}"
 echo "Hawkeye UDP:        ${HAWKEYE_UDP_PORT}"
 echo "TV3_HAWKEYE_VIS:    ${TV3_HAWKEYE_VIS}"
@@ -159,6 +162,7 @@ env EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
 	TV3_MOTOR_ROOT="${TV3_MOTOR_ROOT}" \
 	PX4_SIM_MODEL="${PX4_SIM_MODEL}" \
 	PX4_SIMULATOR="${PX4_SIMULATOR}" \
+	PX4_SIM_SPEED_FACTOR="${PX4_SIM_SPEED_FACTOR}" \
 	./bin/px4 "${PX4_ARGS[@]}" &
 PX4_PID=$!
 

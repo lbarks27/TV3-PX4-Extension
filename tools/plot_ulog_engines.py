@@ -22,6 +22,7 @@ from tools.ulog_replay_common import (  # noqa: E402
     build_query_times,
     euler_angles_deg,
     find_latest_ulog,
+    format_replay_sampling,
     frame_index_at_time,
     import_ulog,
     interpolate_series,
@@ -35,13 +36,10 @@ from tools.ulog_replay_common import (  # noqa: E402
 )
 from tools.tv3_control_allocator import EngineGeometry, engines_from_vehicle, plant_thrust_direction  # noqa: E402
 from tools.tv3_engine_frame import MAX_BUILD_STAGE  # noqa: E402
-from tools.view_vehicle_frame import (  # noqa: E402
-    draw_coupled_yaw_axis,
-    draw_vector,
-    engines_from_manifest,
-    motor_label,
-    vec3,
-)
+from tools.manifest_geometry import motor_label, vec3
+from tools.manifest_io import engines_from_manifest
+from tools.pyvista_draw import draw_coupled_yaw_axis, draw_vector
+from tools.viz_common import CAMERA_PRESETS  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -251,7 +249,7 @@ def draw_replay_engine_thrust(
     ref_thrust_n: float,
     show_gimbal_axes: bool,
 ) -> list:
-    from tools.view_vehicle_frame import EngineActuatorControl
+    from tools.pyvista_draw import EngineActuatorControl
 
     if thrust_n <= 1e-3:
         return []
@@ -314,13 +312,7 @@ def draw_dynamic_frame(
 
 
 DEFAULT_CAMERA = "forward_up"
-REPLAY_CAMERA_PRESETS = {
-    "iso": (24, -58),
-    "top": (90, -90),
-    "side": (0, -90),
-    "front": (0, 180),
-    "forward_up": (-90, 0),
-}
+REPLAY_CAMERA_PRESETS = CAMERA_PRESETS
 
 
 def default_output_path(log_path: Path, suffix: str) -> Path:
@@ -339,7 +331,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use Rerun timed playback instead of the default PyVista interactive 3D view",
     )
     parser.add_argument("--camera", choices=tuple(REPLAY_CAMERA_PRESETS), default=DEFAULT_CAMERA, help="PyVista camera preset")
-    parser.add_argument("--fps", type=float, default=10.0, help="Replay sample rate when building frames")
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=0.0,
+        help="Replay sample rate when building frames (0 = native fastest ULog topic, typically 50 Hz)",
+    )
     parser.add_argument("--stride", type=int, default=1, help="Use every Nth replay frame")
     parser.add_argument("--axis-length", type=float, default=0.12, help="Arrow length for frame and thrust axes (m)")
     parser.add_argument("--build-stage", type=int, choices=(1, 2, 3), default=MAX_BUILD_STAGE)
@@ -351,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def run_engines_replay(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     log_path = find_latest_ulog() if args.latest or args.ulog is None else args.ulog
     if not log_path.exists():
@@ -383,6 +380,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
+    if args.rerun or output_kind == ".rrd":
+        print(format_replay_sampling(frames, fps=args.fps))
+
     if not args.rerun and output_kind != ".rrd":
         render_engine_preview(
             frames[index],
@@ -409,6 +409,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if recording_path is not None:
         print(f"wrote {recording_path}")
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    import warnings
+
+    warnings.warn("plot_ulog_engines is deprecated; use tv3_replay --scene engines", DeprecationWarning, stacklevel=2)
+    return run_engines_replay(argv)
 
 
 if __name__ == "__main__":

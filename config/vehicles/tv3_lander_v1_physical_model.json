@@ -1,0 +1,331 @@
+{
+  "physical_model": {
+    "status": "preliminary",
+    "reference_frame": {
+      "origin": "nozzle_exit_center",
+      "x_axis": "forward_along_airframe",
+      "y_axis": "vehicle_right",
+      "z_axis": "vehicle_down"
+    },
+    "notes": [
+      "Engine mount points lie in the Y-Z plane at x=0 m, 98 mm from the nozzle-exit origin on a 120-degree triangular pattern.",
+      "Engine frame axes are built incrementally: (1) thrust reference +X, (2) primary roll axis mount-to-origin, (3) secondary yaw axis perpendicular.",
+      "Kinematics: roll (+/-90 deg) is about the fixed primary axis toward origin; yaw (0-135 deg) is about the secondary axis carried through roll (yaw coupled to roll).",
+      "Phase 2 intake: vehicle.body_mass_kg is the fixed structure without motors; motor_loaded_mass_kg is per-engine wet propellant mass.",
+      "preliminary_total_with_loaded_motors sums body plus three loaded motors for SIH mass-budget review.",
+      "Replace masses, COMs, inertia tensors, engine positions, splay axes, trims, backlash, and load-cell calibration with measured bench data before flight.",
+      "Large-angle splay is the throttle mechanism; actuator limits, slew rates, and backlash must be measured before hover tests.",
+      "CAD visual meshes live under deprecated/sim/gazebo/assets/cad/lander/; STEP sources are not yet checked in for the lander."
+    ],
+    "assemblies": [
+      {
+        "id": "base_vehicle_without_motors",
+        "total_mass_kg": 1.6,
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_about_origin_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        }
+      },
+      {
+        "id": "preliminary_total_with_loaded_motors",
+        "total_mass_kg": 3.85,
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_about_origin_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        }
+      }
+    ],
+    "links": [
+      {
+        "id": "body",
+        "description": "Fixed lander structure excluding moving nozzle/splay links.",
+        "parent": "model",
+        "mass_kg": 1.6,
+        "pose_m": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.72,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.43,
+          "iyy": 0.43,
+          "izz": 0.05,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_static_structure.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_0",
+        "description": "Engine 0 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          0.098,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_1",
+        "description": "Engine 1 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      },
+      {
+        "id": "engine_nozzle_2",
+        "description": "Engine 2 nozzle and splay mechanism placeholder.",
+        "parent": "body",
+        "mass_kg": 0.75,
+        "pose_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "com_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "inertia_kg_m2": {
+          "ixx": 0.002,
+          "iyy": 0.002,
+          "izz": 0.001,
+          "ixy": 0.0,
+          "ixz": 0.0,
+          "iyz": 0.0
+        },
+        "cad": {
+          "source_mesh": "assets/cad/lander/tv3_lander_engine_nozzle.glb"
+        }
+      }
+    ],
+    "joints": [
+      {
+        "id": "engine_0_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_0",
+        "origin_m": [
+          0.0,
+          0.098,
+          0.0
+        ],
+        "axis": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_0_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_0",
+        "origin_m": [
+          0.0,
+          0.098,
+          0.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_1_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_1",
+        "origin_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.5,
+          -0.866025403784
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_1_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_1",
+        "origin_m": [
+          0.0,
+          -0.049,
+          0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.866025403784,
+          0.5
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_2_splay_roll",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_2",
+        "origin_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498
+        ],
+        "axis": [
+          -0.0,
+          0.5,
+          0.866025403784
+        ],
+        "limit_rad": [
+          -1.5707963267948966,
+          1.5707963267948966
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      },
+      {
+        "id": "engine_2_splay_yaw",
+        "type": "revolute",
+        "parent": "body",
+        "child": "engine_nozzle_2",
+        "origin_m": [
+          0.0,
+          -0.049,
+          -0.08487048957087498
+        ],
+        "axis": [
+          0.0,
+          -0.866025403784,
+          0.5
+        ],
+        "limit_rad": [
+          0.0,
+          2.356194490192345
+        ],
+        "effort_nm": 16.0,
+        "velocity_rad_s": 3.839724,
+        "damping": 0.0,
+        "friction": 0.0,
+        "backlash_rad": 0.0
+      }
+    ]
+  }
+}

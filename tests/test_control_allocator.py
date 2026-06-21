@@ -1,22 +1,9 @@
 from __future__ import annotations
 
-import importlib.util
 import math
-import sys
 import unittest
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def load_module(path: Path):
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
+from tests.support import REPO_ROOT, load_module
 
 allocator = load_module(REPO_ROOT / "tools/tv3_control_allocator.py")
 LANDER = REPO_ROOT / "config/vehicles/tv3_lander_v1.json"

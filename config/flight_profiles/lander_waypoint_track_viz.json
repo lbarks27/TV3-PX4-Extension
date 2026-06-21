@@ -1,7 +1,8 @@
 {
   "schema": "tv3_flight_profile_v1",
   "name": "lander_waypoint_track_viz",
-  "description": "Waypoint tracking profile tuned for visible guidance and engine command review in Hawkeye for the three-engine lander. Uses larger lateral excursions and turns to exercise differential thrust vectoring.",
+  "extends": "lander_waypoint_track.json",
+  "description": "Deprecated alias: merges lander_waypoint_track.json with its viz_profile guidance overrides.",
   "vehicle": "tv3_lander_v1",
   "scenario": {
     "type": "waypoint_track",

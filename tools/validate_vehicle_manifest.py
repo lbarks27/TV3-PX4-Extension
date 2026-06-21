@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.manifest_io import engines_from_manifest, load_manifest  # noqa: E402
 from tools.tv3_control_allocator import (  # noqa: E402
     axes_close,
     dot,
@@ -73,37 +74,6 @@ def vec_norm(values: list[float]) -> float:
     return math.sqrt(sum(value * value for value in values))
 
 
-def engines_from_manifest(manifest: dict) -> list[dict]:
-    propulsion = manifest.get("propulsion", {})
-    engines = propulsion.get("engines")
-    if engines:
-        return engines
-
-    body = manifest["vehicle"]
-    motor = manifest["motor_selection"]
-    load_cell = manifest["hardware"]["load_cell"]
-    return [
-        {
-            "id": "engine_0",
-            "motor_index": motor["index"],
-            "load_cell_channel": load_cell.get("adc_channel", 0),
-            "position_m": [body["motor_com_x_m"], 0.0, 0.0],
-            "thrust_axis": [1.0, 0.0, 0.0],
-            "roll_axis": [0.0, -1.0, 0.0],
-            "yaw_axis": [0.0, 0.0, -1.0],
-            "thrust_fraction": 1.0,
-            "gimbal": {
-                "roll_max_deg": body["tvc_max_deg"],
-                "yaw_max_deg": body["tvc_max_deg"],
-                "splay_max_deg": body["tvc_max_deg"],
-                "slew_dps": body["tvc_slew_dps"],
-                "roll_trim": 0.0,
-                "yaw_trim": 0.0,
-            },
-        }
-    ]
-
-
 def ignition_sequence(manifest: dict, engines: list[dict]) -> list[int]:
     propulsion = manifest.get("propulsion", {})
     ignition = propulsion.get("ignition", {})
@@ -111,11 +81,34 @@ def ignition_sequence(manifest: dict, engines: list[dict]) -> list[int]:
     return [int(value) for value in sequence]
 
 
-def placeholder_fields(data_status: dict) -> dict[str, str]:
+def derive_data_status_fields(manifest: dict) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    vehicle = manifest.get("vehicle", {})
+    for key in ("body_mass_kg", "body_com_x_m", "motor_com_x_m", "motor_loaded_mass_kg", "motor_dry_mass_kg"):
+        if key in vehicle:
+            fields[f"vehicle.{key}"] = "preliminary"
+
+    load_cell = manifest.get("hardware", {}).get("load_cell", {})
+    calibration = load_cell.get("calibration", {})
+    if calibration.get("tare", 0.0) == 0.0 and calibration.get("scale", 1.0) in (0.0, 1.0):
+        fields["hardware.load_cell.calibration"] = "placeholder"
+    if not load_cell.get("channels"):
+        fields["hardware.load_cell.channels"] = "placeholder"
+
+    if manifest.get("physical_model"):
+        fields["physical_model.links"] = str(manifest.get("physical_model", {}).get("status", "preliminary"))
+    if manifest.get("propulsion", {}).get("engines"):
+        fields["propulsion.engines"] = "preliminary"
+    return fields
+
+
+def placeholder_fields(data_status: dict, manifest: dict | None = None) -> dict[str, str]:
     fields = data_status.get("fields", {})
-    if not isinstance(fields, dict):
-        return {}
-    return {str(key): str(value) for key, value in fields.items()}
+    if isinstance(fields, dict) and fields:
+        return {str(key): str(value) for key, value in fields.items()}
+    if manifest is not None:
+        return derive_data_status_fields(manifest)
+    return {}
 
 
 def validate_manifest(manifest: dict, manifest_path: Path, schema: dict) -> ValidationReport:
@@ -177,7 +170,7 @@ def validate_manifest(manifest: dict, manifest_path: Path, schema: dict) -> Vali
             )
         )
 
-    field_map = placeholder_fields(data_status)
+    field_map = placeholder_fields(data_status, manifest)
     non_measured = {key: status for key, status in field_map.items() if status != "measured"}
     metrics["tracked_fields"] = len(field_map)
     metrics["non_measured_fields"] = len(non_measured)
@@ -484,7 +477,7 @@ def validate_all(schema_path: Path = DEFAULT_SCHEMA, manifests: list[Path] | Non
     reports: list[ValidationReport] = []
 
     for manifest_path in manifest_paths:
-        manifest = load_json(manifest_path)
+        manifest = load_manifest(manifest_path)
         report = validate_manifest(manifest, manifest_path, schema)
         parity_checks = validate_param_parity(manifest, manifest_path, schema)
         report.checks.extend(parity_checks)

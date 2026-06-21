@@ -24,7 +24,7 @@ python3 "${REPO_ROOT}/tools/tv3_allocator.py" \
 
 python3 "${REPO_ROOT}/tools/tv3_allocator.py" \
 	--vehicle "${REPO_ROOT}/config/vehicles/tv3_lander_v1.json" \
-	--thrust 40 \
+	--thrust 95 \
 	--torque 0 0 0 | python3 -c 'import json,sys; data=json.load(sys.stdin); assert not data["reachable"]; assert data["reason"] == "net thrust outside splay envelope"'
 
 printf 'Phase 4 control-mixer gate passed\n'

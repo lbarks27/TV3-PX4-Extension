@@ -7,7 +7,7 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 
 cd "${REPO_ROOT}"
 
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+"${SCRIPT_DIR}/run_tests.sh"
 
 ./tools/validate_vehicle_manifest.py
 

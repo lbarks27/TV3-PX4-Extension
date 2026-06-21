@@ -103,8 +103,7 @@ class BenchCapture:
         }
 
 
-def load_manifest(path: Path) -> dict:
-    return json.loads(path.read_text())
+from tools.manifest_io import load_manifest
 
 
 def save_manifest(path: Path, manifest: dict) -> None:

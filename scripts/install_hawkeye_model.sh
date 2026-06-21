@@ -14,10 +14,12 @@ set -euo pipefail
 #   identity     - scale/center only
 #   custom       - set TV3_HAWKEYE_MESH_MATRIX to nine space-separated row-major values
 
-SRC_OBJ="${TV3_HAWKEYE_MESH:-/Users/liambarkley/Downloads/TV3+Hub+Test+1.obj}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+SRC_OBJ="${TV3_HAWKEYE_MESH:-${REPO_ROOT}/assets/meshes/tv3_lander_v1.obj}"
 SCALE="${TV3_HAWKEYE_MESH_SCALE:-0.001}"
 CENTER="${TV3_HAWKEYE_MESH_CENTER:-1}"
-ROT="${TV3_HAWKEYE_MESH_ROT:-tv3_hover}"
+ROT="${TV3_HAWKEYE_MESH_ROT:-tv3_manifest}"
 HAWKEYE_MODEL="${TV3_HAWKEYE_MODEL:-px4_fixed_wing}"
 
 if [ ! -f "${SRC_OBJ}" ]; then
@@ -138,6 +140,9 @@ def resolve_rotation(preset: str, custom: str):
         ]
     )
 
+    if preset == "tv3_manifest":
+        # Repo-generated manifest mesh is already in TV3 vehicle frame (+X fwd, +Z down).
+        return s
     if preset == "tv3_hover":
         # Fusion export: long axis on +Z. SIH hover uses a 90 deg body-Y quaternion and Hawkeye
         # -fw applies Rx(+90) then Ry(+180) before that attitude. Map CAD +Z to OBJ +Y.

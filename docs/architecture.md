@@ -40,13 +40,16 @@ These are the modules and definitions that run on the flight controller (SITL or
 
 - **uORB messages** (`msg/*.msg`): Define TV3-specific topics such as `Tv3Status`, `Tv3EngineCommand`, `Tv3LoadCell`, `Tv3Thrust`, `Tv3MotorReference`, `Tv3ModeStatus`, `Tv3GuidanceStatus`, etc.
 - **Custom modules** (`src/modules/`):
-  - `tv3_motor_model`: Motor thrust curve handling and reference state.
-  - `tv3_load_cell` (+ `tv3_load_cell_telemetry`): Load-cell driver integration and calibrated thrust signals.
-  - `tv3_mode_manager`: Ignition, launch, abort, reset, burnout, and coast state machine.
-  - `tv3_att_control`: Attitude/rate PID mixer that produces body wrench setpoints (`vehicle_torque_setpoint` / `vehicle_thrust_setpoint`).
-  - `tv3_guidance`: Waypoint, hover, landing, and envelope-aware guidance (enabled per-manifest via `guidance.enable`).
-  - `tv3_sih`: The simplified deterministic SIH plant used for controller development and gate validation.
-- **Control allocator patch** (`patches/px4/`): Still present for geometry parameters (`CA_RK_*`) and to keep `control_allocator_status` logging; however the small-angle `ActuatorEffectivenessTV3` servo outputs are **bypassed** at runtime. Command synthesis for TVC is performed by a weighted projected-GD joint (torque + thrust) solver inside `tv3_mode_manager` using the full nonlinear kinematics.
+  - `vehicle/tv3_mode_manager`: Ignition, launch, abort, reset, burnout, and coast state machine.
+  - `guidance/tv3_guidance`: Waypoint, hover, landing, and envelope-aware guidance (enabled per-manifest via `guidance.enable`).
+  - `control/reference/tv3_attitude_reference`: Launch-frame, guidance tilt, and roll-program attitude references.
+  - `control/attitude/tv3_attitude_control`: Attitude/rate PID producing `vehicle_torque_setpoint`.
+  - `control/allocation/tv3_tvc_allocator`: Joint projected-GD TVC allocator producing `tv3_engine_command`.
+  - `propulsion/tv3_motor_model`: Motor thrust curve handling and reference state.
+  - `sensing/tv3_load_cell` (+ `tv3_load_cell_telemetry`): Load-cell driver integration and calibrated thrust signals.
+  - `simulation/tv3_sih`: The simplified deterministic SIH plant used for controller development and gate validation.
+- **Shared control library** (`src/lib/tv3/`): Nonlinear plant kinematics and projected-gradient allocator used by `tv3_tvc_allocator`.
+- **Control allocator patch** (`patches/px4/`): Still present for geometry parameters (`CA_RK_*`) and to keep `control_allocator_status` logging; runtime TVC command synthesis is performed by `tv3_tvc_allocator` using the full nonlinear kinematics in `src/lib/tv3/`.
 - **Startup / ROMFS overlays** (`overlay/ROMFS/`): Control module start order and enable TV3 behaviors for both POSIX SITL and NuttX hardware images.
 
 ### 2. Vehicle and Scenario Configuration

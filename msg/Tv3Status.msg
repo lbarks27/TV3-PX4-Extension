@@ -43,3 +43,9 @@ uint32 fault_reason
 
 uint16 selected_motor_index
 char[32] selected_motor_id
+
+uint8 engine_count
+uint8 ignition_mask
+uint8 active_ignition_index
+bool sequence_active
+bool sequence_complete

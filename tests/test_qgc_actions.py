@@ -9,7 +9,7 @@ from pathlib import Path
 class QGroundControlActionTests(unittest.TestCase):
     def test_tv3_qgc_actions_match_firmware_command_contract(self) -> None:
         actions_path = Path("config/qgc/TV3Actions.json")
-        source_path = Path("src/modules/flight_modes/tv3_mode_manager.cpp")
+        source_path = Path("src/modules/vehicle/tv3_mode_manager.cpp")
         command_msg_path = Path("msg/Tv3Command.msg")
 
         actions_doc = json.loads(actions_path.read_text())

@@ -229,6 +229,17 @@ def replay_trajectory(
             ),
         )
 
+        com_x = 0.0
+        try:
+            if manifest is not None:
+                com_x = float(manifest.get("vehicle", {}).get("body_com_x_m", 0.0))
+        except Exception:
+            com_x = 0.0
+        rr.log(
+            "world/vehicle/com",
+            rr.Points3D([[com_x, 0.0, 0.0]], radii=[0.035], colors=[[255, 200, 50]], labels=["CoM"]),
+        )
+
         if frame.setpoint_ned is not None:
             sp = ned_to_plot_xyz(*frame.setpoint_ned)
             rr.log("world/setpoint", rr.Points3D([sp], colors=[106, 155, 209], radii=[0.4], labels=["setpoint"]))
@@ -354,6 +365,18 @@ def replay_engines(
             ),
         )
 
+        # CoM marker (body frame) for this replay too
+        com_x = 0.0
+        try:
+            if manifest is not None:
+                com_x = float(manifest.get("vehicle", {}).get("body_com_x_m", 0.0))
+        except Exception:
+            com_x = 0.0
+        rr.log(
+            "world/vehicle/com",
+            rr.Points3D([[com_x, 0.0, 0.0]], radii=[0.035], colors=[[255, 200, 50]], labels=["CoM"]),
+        )
+
         total_thrust = float(sum(frame.engine_thrust_n))
         rr.log(
             "summary",
@@ -423,6 +446,19 @@ def replay_unified(
                     colors=[[255, 127, 14], [44, 160, 44], [214, 39, 40]],
                     labels=["F", "R", "D"],
                 ),
+            )
+            # Mark the declared body CoM (from manifest) so reviewers can see mass location
+            # relative to engine mounts and thrust arrows. This explains "upside down" impressions
+            # when the mesh vertices are concentrated near the engine plane (X≈0) while CoM is at +X.
+            com_x = 0.0
+            try:
+                if manifest is not None:
+                    com_x = float(manifest.get("vehicle", {}).get("body_com_x_m", 0.0))
+            except Exception:
+                com_x = 0.0
+            rr.log(
+                "world/vehicle/com",
+                rr.Points3D([[com_x, 0.0, 0.0]], radii=[0.035], colors=[[255, 200, 50]], labels=["CoM"]),
             )
             if traj.setpoint_ned is not None:
                 sp = ned_to_plot_xyz(*traj.setpoint_ned)

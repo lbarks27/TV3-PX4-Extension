@@ -22,6 +22,8 @@ Options:
   TV3_FLIGHT_PROFILE      Optional env var copied beside archived logs when set.
   --since-marker PATH     Only archive .ulg files newer than this marker file.
   --notes TEXT            Short notes written to manifest.txt.
+  --no-rrd                Skip Rerun .rrd export (default: export when viz env exists).
+  TV3_SKIP_RRD_EXPORT=1   Same as --no-rrd.
   -h, --help              Show this help.
 EOF
 }
@@ -39,6 +41,7 @@ WORKTREE=""
 SIMULATOR="${TV3_SIMULATOR:-${PX4_SIMULATOR:-}}"
 SINCE_MARKER=""
 NOTES=""
+EXPORT_RRD=1
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -78,6 +81,10 @@ while [ "$#" -gt 0 ]; do
 			NOTES="${2:?missing value for --notes}"
 			shift 2
 			;;
+		--no-rrd)
+			EXPORT_RRD=0
+			shift
+			;;
 		-h|--help)
 			usage
 			exit 0
@@ -89,6 +96,10 @@ while [ "$#" -gt 0 ]; do
 			;;
 	esac
 done
+
+if [ "${TV3_SKIP_RRD_EXPORT:-0}" = "1" ]; then
+	EXPORT_RRD=0
+fi
 
 case "${KIND}" in
 	sim|flight|ground)
@@ -153,9 +164,30 @@ RUN_DIR="${ARCHIVE_ROOT}/${KIND}/${ARCHIVE_DAY}/${RUN_ID}"
 
 mkdir -p "${RUN_DIR}"
 
+ARCHIVED_LOGS=()
 for log_path in "${LOGS[@]}"; do
-	cp -p "${log_path}" "${RUN_DIR}/$(basename -- "${log_path}")"
+	archived_name=$(basename -- "${log_path}")
+	cp -p "${log_path}" "${RUN_DIR}/${archived_name}"
+	ARCHIVED_LOGS+=("${RUN_DIR}/${archived_name}")
 done
+
+RRD_FILES=()
+if [ "${EXPORT_RRD}" -eq 1 ]; then
+	TV3_ROOT=$(cd -- "${REPO_ROOT}/.." && pwd)
+	VIZ_PYTHON="${TV3_VIZ_PYTHON:-${TV3_ROOT}/.work/tv3-viz-venv/bin/python}"
+	if [ -x "${VIZ_PYTHON}" ]; then
+		for archived_log in "${ARCHIVED_LOGS[@]}"; do
+			rrd_path="${archived_log%.ulg}.tv3.rrd"
+			if "${SCRIPT_DIR}/export_log_rrd.sh" "${archived_log}" -o "${rrd_path}"; then
+				RRD_FILES+=("$(basename -- "${rrd_path}")")
+			else
+				echo "warning: failed to export Rerun recording for ${archived_log}" >&2
+			fi
+		done
+	else
+		echo "Skipping RRD export (viz env missing). Run ./scripts/setup_viz_env.sh" >&2
+	fi
+fi
 
 if [ -n "${VEHICLE_CONFIG}" ]; then
 	if [[ "${VEHICLE_CONFIG}" != /* ]]; then
@@ -210,14 +242,27 @@ fi
 	echo "hawkeye_udp_port: ${HAWKEYE_UDP_PORT:-19410}"
 	echo "tv3_motor_root: ${TV3_MOTOR_ROOT:-}"
 	echo "log_count: ${#LOGS[@]}"
+	echo "rrd_export: $([ "${EXPORT_RRD}" -eq 1 ] && echo enabled || echo skipped)"
+	echo "rrd_count: ${#RRD_FILES[@]}"
 	if [ -n "${NOTES}" ]; then
 		echo "notes: ${NOTES}"
 	fi
 	echo
 	echo "logs:"
-	for log_path in "${LOGS[@]}"; do
-		echo "  - $(basename -- "${log_path}")"
+	for archived_log in "${ARCHIVED_LOGS[@]}"; do
+		echo "  - $(basename -- "${archived_log}")"
 	done
+	if [ "${#RRD_FILES[@]}" -gt 0 ]; then
+		echo
+		echo "rerun_recordings:"
+		for rrd_name in "${RRD_FILES[@]}"; do
+			echo "  - ${rrd_name}"
+		done
+	fi
 } > "${RUN_DIR}/manifest.txt"
 
-echo "Archived ${#LOGS[@]} PX4 log(s) to ${RUN_DIR}"
+if [ "${#RRD_FILES[@]}" -gt 0 ]; then
+	echo "Archived ${#LOGS[@]} PX4 log(s) and ${#RRD_FILES[@]} Rerun recording(s) to ${RUN_DIR}"
+else
+	echo "Archived ${#LOGS[@]} PX4 log(s) to ${RUN_DIR}"
+fi

@@ -205,11 +205,11 @@ The SIH plant (`tv3_sih`) and the TV3 PX4 extension prioritize deterministic, fa
 
 ### Control and Allocation Path in SIH
 - Gimbal angles on `tv3_engine_command` (roll/primary + yaw/splay secondary) come from `tv3_mode_manager`, which forwards allocator servos + computes collective splay yaw when `RK_GD_ENABLE` and guidance thrust solution is valid.
-- The allocator (via patch) and `tv3_att_control` produce torques; splay throttle for lander is handled outside the allocator as a thrust modulator.
+- The allocator (via patch) and `tv3_attitude_control` produce torques; `tv3_tvc_allocator` maps torque and guidance thrust onto per-engine TVC commands.
 - **Not addressed in SIH**: the full nonlinear kinematics are present and match the Python reference model, but the complete closed-loop "commanded wrench → allocator → actuator commands → plant" for all cases relies on mode_manager bridging.
 
 ### Broader Extension Complexity and Duplication
-- **Custom modules**: `tv3_mode_manager`, `tv3_guidance`, `tv3_att_control`, `tv3_motor_model`, load-cell modules, and `tv3_sih` implement TV3-specific behaviors (solid-motor ignition confirmation via load cell, splay-as-throttle, custom command 31010, per-engine state, mass reporting from curves). Stock PX4 components are reused (control allocator via CA_RK, attitude, uORB pubs, SITL sensors) where possible.
+- **Custom modules**: `tv3_mode_manager`, `tv3_guidance`, `tv3_attitude_reference`, `tv3_attitude_control`, `tv3_tvc_allocator`, `tv3_motor_model`, load-cell modules, and `tv3_sih` implement TV3-specific behaviors (solid-motor ignition confirmation via load cell, splay-as-throttle, custom command 31010, per-engine state, mass reporting from curves). Stock PX4 components are reused (control allocator via CA_RK, attitude, uORB pubs, SITL sensors) where possible.
 - **Dual parameter sets**: `CA_RK_*` (for patched `ActuatorEffectivenessTV3` and allocator) + `RK_*` (for TV3 modules). Both are generated from the same vehicle manifest by `tools/generate_vehicle_assets.py`. This duplication exists because the allocator lives in a PX4 patch.
 - **Manifest richness vs runtime use**: `config/vehicles/*.json` contains detailed `physical_model` (links, joints, inertias about origin, CAD refs) for intake, validation (`check_physical_manifests.sh`), and future use. Runtime only consumes a flattened subset via generated params + `tv3_motor_model` curves.
 - **Allocator implementation**: The patch is retained for `CA_RK_*` parameter schema and `control_allocator_status`. Actual TVC commands are produced by the joint nonlinear projected-GD solver in `tv3_mode_manager` (bypassing the small-angle pseudo-inverse outputs).

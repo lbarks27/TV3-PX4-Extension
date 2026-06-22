@@ -1,12 +1,14 @@
 # TV3 Control Mixer
 
 This document describes the control stack for the triple-engine splay-throttle lander
-(`tv3_lander_v1`). The stack is split across two layers:
+(`tv3_lander_v1`). The stack follows the control pipeline:
 
-1. An attitude **mixer** (`tv3_att_control`) that produces body torque setpoints.
-2. A **joint projected-GD solver** inside `tv3_mode_manager` that maps the torque
-   demand + guidance thrust demand onto per-engine TVC (roll + yaw) commands using the
-   full nonlinear plant.
+1. `tv3_attitude_reference` — launch frame, guidance tilt, and roll program → `vehicle_attitude_setpoint`
+2. `tv3_attitude_control` — attitude/rate PID → `vehicle_torque_setpoint`
+3. `tv3_tvc_allocator` — joint projected-GD solver → per-engine TVC commands in `tv3_engine_command`
+
+`tv3_mode_manager` owns vehicle state and ignition sequencing; it publishes `tv3_status`
+including propulsion sequencing fields consumed by the allocator.
 
 The stock PX4 `control_allocator` + `ActuatorEffectivenessTV3` still execute (for
 parameter geometry and logging), but their servo outputs are not used to synthesize
@@ -20,38 +22,33 @@ is not available.
 
 ```mermaid
 flowchart LR
-    subgraph inputs
-        ATT[vehicle_attitude]
-        RATE[vehicle_angular_velocity]
-        TRAJ[trajectory_setpoint]
-        STATUS[tv3_status]
-        GUIDS[tv3_guidance_status]
+    subgraph mission
+        MM[tv3_mode_manager]
+        GD[tv3_guidance]
     end
 
-    subgraph mixer["tv3_att_control (control mixer)"]
-        PID[Attitude + rate PID]
-        GUID[Guidance tilt reference]
+    subgraph references
+        AR[tv3_attitude_reference]
     end
 
-    subgraph solver["tv3_mode_manager (joint projected GD)"]
-        JGD[Nonlinear plant + weighted PG on 2N angles]
+    subgraph control
+        AC[tv3_attitude_control]
+        CA[tv3_tvc_allocator]
     end
 
     subgraph outputs
+        ASP[vehicle_attitude_setpoint]
         TQ[vehicle_torque_setpoint]
-        TH[vehicle_thrust_setpoint = 0]
         ENG[tv3_engine_command]
     end
 
-    ATT --> PID
-    RATE --> PID
-    TRAJ --> GUID --> PID
-    STATUS --> PID
-    GUIDS --> JGD
-    PID --> TQ
-    PID --> TH
-    TQ --> JGD
-    GUIDS --> JGD --> ENG
+    GD -->|trajectory_setpoint| AR
+    MM -->|tv3_status| AR
+    AR --> ASP --> AC
+    AC --> TQ --> CA
+    GD -->|tv3_guidance_status| CA
+    MM -->|tv3_status| CA
+    CA --> ENG
 ```
 
 SITL startup order from `overlay/ROMFS/init.d-posix/airframes/tv3_common.post`:
@@ -61,15 +58,25 @@ control_allocator start
 tv3_motor_model start
 tv3_load_cell start
 tv3_mode_manager start
-tv3_att_control start
+tv3_guidance start            # when RK_GD_ENABLE=1
+tv3_attitude_reference start
+tv3_attitude_control start
+tv3_tvc_allocator start
 ```
 
 (Note: `control_allocator` still starts for parameter loading and `control_allocator_status`
 logging, but its servo outputs are not used for TVC command synthesis.)
 
-## Layer 1: `tv3_att_control` — attitude mixer
+## Layer 1: `tv3_attitude_reference`
 
-Source: `src/modules/control_mixer/tv3_att_control.cpp`
+Source: `src/modules/control/reference/tv3_attitude_reference.cpp`
+
+Publishes `vehicle_attitude_setpoint` from the launch-frame quaternion, optional
+guidance tilt from `trajectory_setpoint`, and the configured roll program.
+
+## Layer 2: `tv3_attitude_control`
+
+Source: `src/modules/control/attitude/tv3_attitude_control.cpp`
 
 This module runs at 100 Hz on the rate-control work queue. It is **not** the per-engine
 mixer; it closes the attitude loop and publishes body-frame wrench demands.
@@ -80,9 +87,8 @@ mixer; it closes the attitude loop and publishes body-frame wrench demands.
 |-----------|------------|------|
 | In | `vehicle_attitude` | Current body attitude |
 | In | `vehicle_angular_velocity` | Body rates and derivatives |
-| In | `trajectory_setpoint` | Guidance velocity/position commands |
+| In | `vehicle_attitude_setpoint` | Desired attitude quaternion |
 | In | `tv3_status` | Flight mode, rail exit, abort state |
-| In | `tv3_thrust` | Trusted thrust signal (load cell or reference) |
 | Out | `vehicle_torque_setpoint` | Roll/pitch/yaw torque demand (Nm) |
 | Out | `vehicle_thrust_setpoint` | Normalized axial thrust command |
 
@@ -119,17 +125,18 @@ Lander manifest defaults for torque limits (`config/vehicles/tv3_lander_v1.json`
 
 ### Guidance coupling
 
+Guidance tilt and roll-program shaping are implemented in `tv3_attitude_reference`.
 When `RK_GD_ENABLE=1`, horizontal velocity and position commands from
 `trajectory_setpoint` tilt the attitude reference away from the launch quaternion.
 Tilt magnitude is `horiz_speed × RK_ATT_TILT_GAIN`, capped at `RK_ATT_TILT_MAX`
-(default 20°). This steers thrust laterally without bypassing the attitude loop.
+(default 20°). `tv3_attitude_control` tracks the resulting `vehicle_attitude_setpoint`.
 
-## Layer 2: Joint projected-gradient allocation (torque + thrust)
+## Layer 3: Joint projected-gradient allocation (torque + thrust)
 
 TV3 does **not** use the stock PX4 allocator's servo outputs as the source of gimbal
 commands for flight. The allocator (`ActuatorEffectivenessTV3`) and its small-angle
 linearization still run (for `control_allocator_status` and geometry params), but
-`tv3_mode_manager` ignores those servos for synthesis and instead runs a live
+`tv3_tvc_allocator` ignores those servos for synthesis and instead runs a live
 weighted projected gradient descent solver at 100 Hz that jointly solves for
 per-engine roll/yaw angles to achieve both the desired body torque **and** the
 net axial thrust.
@@ -160,9 +167,10 @@ error in the combined cost (matching historical scoring). The implementation use
 smooth quadratic proxy on the 4-D residual with coordinate-wise normalized steps
 and projection. 
 
-Firmware: implemented inside `tv3_mode_manager::publish_outputs`. The same
-kinematics helpers (`dir_at`, `grp_tq`, `tot_*`) are used so that the plant, host
-checker, and flight solver are bit-compatible for a given (thrusts, angles).
+Firmware: implemented in `tv3_tvc_allocator` using `src/lib/tv3/`. The shared plant
+kinematics helpers (`thrust_direction_at`, `total_torque_nm`, `total_axial_thrust_n`)
+keep the flight solver aligned with `tv3_sih` and the host checker for a given
+(thrusts, angles) pair.
 
 ### Per-engine geometry (`tv3_lander_v1`)
 
@@ -292,14 +300,16 @@ plotting workflow.
 
 | Layer | Module | Role |
 |-------|--------|------|
-| Attitude mixer | `tv3_att_control` | PID → torque (thrust SP remains zero) |
-| Joint nonlinear allocator | `tv3_mode_manager` (projected GD) | Solves 2N gimbal angles for torque vector + net axial thrust using full plant |
+| Attitude reference | `tv3_attitude_reference` | Launch frame + guidance tilt + roll program → `vehicle_attitude_setpoint` |
+| Attitude control | `tv3_attitude_control` | PID → `vehicle_torque_setpoint` (thrust SP remains zero) |
+| Joint nonlinear allocator | `tv3_tvc_allocator` (projected GD) | Solves 2N gimbal angles for torque vector + net axial thrust using full plant |
+| Vehicle state | `tv3_mode_manager` | Ignition sequencing and `tv3_status` for the control pipeline |
 | Throttle | Emergent from secondary-axis solution | Cosine loss realized by the thrust component of the joint objective |
 | Validation | `tools/tv3_control_allocator.py` (projected GD) | Offline envelope + weighted joint reachability |
 | Plant | `tv3_sih` | Full nonlinear gimbal kinematics |
 
 The triple-engine lander uses **differential gimbaling** across three offset nozzles to
 generate pitch, yaw, and roll torque. Net thrust (throttle) is obtained from the same
-secondary-axis actuators. The attitude mixer decides the wrench; `tv3_mode_manager`
+secondary-axis actuators. `tv3_attitude_control` decides the wrench; `tv3_tvc_allocator`
 runs the joint projected GD solver that finds the actuator angles best satisfying
 both torque and thrust under the nonlinear kinematics and limits.

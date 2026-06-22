@@ -90,7 +90,9 @@ SITL first writes PX4 ULogs to the local PX4 rootfs:
 logs/sim/YYYY-MM-DD/<run-id>/
 ```
 
-Each archive directory includes copied `.ulg` files plus `manifest.txt`; SITL archives also include `logger_topics.txt`, `flight_profile.json`, and `vehicle.json` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
+Each archive directory includes copied `.ulg` files, a `.tv3.rrd` Rerun recording per log (when the viz env is installed), and `manifest.txt`; SITL archives also include `logger_topics.txt`, `flight_profile.json`, and `vehicle.json` when available. The binary log payloads are ignored by git, but they stay in the project checkout for local analysis.
+
+Skip RRD export with `--no-rrd` on `archive_px4_logs.sh` or `TV3_SKIP_RRD_EXPORT=1`. Re-export later with `./scripts/export_log_rrd.sh path/to/log.ulg`.
 
 Use a stable run ID when you want a predictable folder name:
 
@@ -98,10 +100,15 @@ Use a stable run ID when you want a predictable folder name:
 TV3_LOG_RUN_ID=lander-smoke-001 ./scripts/run_sitl_sih.sh
 ```
 
-Archive flight-hardware or ground-test logs copied from QGroundControl, an SD card, or another source with:
+Archive flight logs from the Cube microSD card only (see
+[hardware_flight_workflow.md](hardware_flight_workflow.md#archive-flight-logs-microsd)).
+Ground-test logs may come from the card or another local path:
 
 ```bash
-./scripts/archive_px4_logs.sh --kind flight --source /path/to/log.ulg --run-id flight-001
+./scripts/archive_px4_logs.sh --kind flight \
+  --source "/Volumes/NO NAME/log" \
+  --run-id flight-001 \
+  --vehicle-config config/vehicles/tv3_v1.json
 ./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id load-cell-bench-001
 ```
 
@@ -166,6 +173,8 @@ Camera presets for PyVista: `iso`, `top`, `side`, `front`, `forward_up`, `overvi
 Use Rerun when you want to scrub through time. Guidance metrics are Rerun-only (no PyVista 3D scene).
 
 **One file per sim, with everything.** Rerun exports always include the full content (vehicle trajectory + attitude, engine gimbal angles + live thrust vectors, and guidance scalars like required/measured thrust and margins) on a single `sim_time` timeline. There are no separate per-section `.rrd` files.
+
+A yellow "CoM" dot is drawn at the declared body_com (from the vehicle manifest) in the body frame. This makes mass location vs. engine mounts explicit for stability reviews.
 
 ```bash
 ./scripts/tv3_replay.sh --latest --rerun

@@ -42,6 +42,7 @@ class EngineGeometry:
     thrust_fraction: float = 1.0
     roll_trim: float = 0.0
     yaw_trim: float = 0.0
+    com_body_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -173,6 +174,7 @@ def engines_from_vehicle(vehicle: dict) -> list[EngineGeometry]:
         if motor_selection.get("catalog_source")
         else None
     )
+    com_body: tuple[float, float, float] = (float(body.get("body_com_x_m", 0.0)), 0.0, 0.0)
     engines = vehicle.get("propulsion", {}).get("engines")
     if not engines:
         engines = [
@@ -226,6 +228,7 @@ def engines_from_vehicle(vehicle: dict) -> list[EngineGeometry]:
                 thrust_fraction=engine.get("thrust_fraction", 1.0 / len(engines)),
                 roll_trim=float(gimbal.get("roll_trim", gimbal.get("pitch_trim", 0.0))),
                 yaw_trim=gimbal.get("yaw_trim", 0.0),
+                com_body_m=com_body,
             )
         )
     return geometries
@@ -298,6 +301,7 @@ def scaled_engines(
                 thrust_fraction=engine.thrust_fraction,
                 roll_trim=engine.roll_trim,
                 yaw_trim=engine.yaw_trim,
+                com_body_m=engine.com_body_m,
             )
         )
     return scaled
@@ -316,13 +320,14 @@ def flight_effectiveness_torque(
     max_angle_deg: float,
     reference_thrust_n: float | None = None,
 ) -> tuple[float, float, float]:
-    """Matches ActuatorEffectivenessTV3::computeTorque at full servo deflection."""
+    """Linearized max torque about CoM (for limits checks); matches old effectiveness shape but levered at com."""
     thrust_axis = normalize(engine.thrust_axis, (1.0, 0.0, 0.0))
     axis = normalize(gimbal_axis, (0.0, -1.0, 0.0))
     thrust_scale = (reference_thrust_n or engine.thrust_n) * constrain(engine.thrust_fraction, 0.0, 1.0)
     max_angle_rad = math.radians(max_angle_deg)
+    lever = sub(engine.position_m, engine.com_body_m)
     return scale(
-        cross(engine.position_m, cross(axis, thrust_axis)),
+        cross(lever, cross(axis, thrust_axis)),
         thrust_scale * max_angle_rad,
     )
 
@@ -389,10 +394,11 @@ def plant_torque(
     roll_deg: float,
     yaw_deg: float,
 ) -> tuple[float, float, float]:
-    """Matches the SIH thrust-direction model used in tv3_sih."""
+    """Torque about vehicle CoM (lever = mount_pos - com). Matches SIH forward model."""
     direction, magnitude = plant_force_vector(engine, roll_deg, yaw_deg)
     force = scale(direction, magnitude)
-    return cross(engine.position_m, force)
+    lever = sub(engine.position_m, engine.com_body_m)
+    return cross(lever, force)
 
 
 def plant_axial_thrust(engine: EngineGeometry, roll_deg: float, yaw_deg: float) -> float:
@@ -536,7 +542,7 @@ def allocate_projected_gradient(
     Design (4D residual + projected GD):
     - Decision variables: per-active-engine (roll_deg, yaw_deg) commands.
     - Forward model: exact nonlinear plant_* (Rodrigues rotations for nested gimbal axes,
-      torque = pos cross (dir * chamber_thrust), axial = dir_x * chamber).
+      torque = (mount_pos - com) cross (dir * chamber_thrust), axial = dir_x * chamber).
     - Residual: et = desired_torque - achieved_torque (3), ef = desired_thrust - achieved_axial (1).
     - Weighted quadratic proxy minimized: 0.5*wt*||et||^2 + 0.5*(thrust_weight * ef)^2
       (gradient contribution: et·dt + thrust_weight*ef*df ).

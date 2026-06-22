@@ -213,7 +213,7 @@ checked-in vehicle JSON:
 
 Bench capture JSON is written automatically under `logs/ground/bench_capture_*.json` by
 `complete_phase2_bench.sh`. Reference those files in completion status evidence. When you
-also have ground-test `.ulg` files from QGC or the microSD card, archive them with:
+also have ground-test `.ulg` files from the microSD card, archive them with:
 
 ```bash
 ./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id phase2-bench-001
@@ -384,6 +384,59 @@ Archive ground-test `.ulg` files into the repo (bench capture JSON already lives
 ./scripts/archive_px4_logs.sh --kind ground --source /path/to/log.ulg --run-id bench-001
 ```
 
+## Archive Flight Logs (microSD)
+
+Flight logs are recovered from the Cube microSD card only. Do not use QGroundControl
+log downloads as the flight archive source — telemetry downloads are incomplete and
+not the repo's evidence path.
+
+After a flight or abort:
+
+1. Safe the vehicle and disarm.
+2. Remove the microSD card from the Cube Orange Plus.
+3. Mount the card on the review machine (macOS usually shows it as `/Volumes/NO NAME`).
+4. Copy the PX4 ULogs from the card's `log/` tree:
+
+```text
+/Volumes/NO NAME/log/YYYY-MM-DD/HH_MM_SS.ulg
+```
+
+5. Archive into this checkout:
+
+```bash
+./scripts/archive_px4_logs.sh --kind flight \
+  --source "/Volumes/NO NAME/log" \
+  --run-id pad-a-flight-001 \
+  --vehicle-config config/vehicles/tv3_v1.json \
+  --notes "Pad A, nominal ascent"
+```
+
+`--source` may be the card's `log/` directory (archives every `.ulg` found) or a
+single `.ulg` file. Each archived log gets a matching `.tv3.rrd` Rerun recording
+when `./scripts/setup_viz_env.sh` has been run. Skip RRD export with `--no-rrd`.
+
+Archived flight evidence lands under:
+
+```text
+logs/flight/YYYY-MM-DD/<run-id>/
+  HH_MM_SS.ulg
+  HH_MM_SS.tv3.rrd
+  manifest.txt
+  vehicle.json
+```
+
+Binary logs stay local (`logs/flight/*` is gitignored). Commit durable review
+notes, completion-status evidence pointers, and selected plots — not the `.ulg` or
+`.rrd` files themselves.
+
+Review recordings with:
+
+```bash
+../.work/tv3-viz-venv/bin/rerun logs/flight/YYYY-MM-DD/<run-id>/HH_MM_SS.tv3.rrd
+```
+
+Safely eject the card before reinserting it into the Cube for the next campaign.
+
 ## Launch-Day Software Flow
 
 Use this only as the software checklist inside the approved range procedure.
@@ -414,11 +467,14 @@ After flight or abort:
 
 - safe the vehicle before handling
 - disarm from QGC or the approved local control path
-- copy the `.ulg` files from QGC, the microSD card, or another hardware source
-- archive the flight logs:
+- remove the microSD card and archive flight logs from the card (see
+  [Archive Flight Logs (microSD)](#archive-flight-logs-microsd)):
 
 ```bash
-./scripts/archive_px4_logs.sh --kind flight --source /path/to/flight.ulg --run-id flight-001
+./scripts/archive_px4_logs.sh --kind flight \
+  --source "/Volumes/NO NAME/log" \
+  --run-id flight-001 \
+  --vehicle-config config/vehicles/tv3_v1.json
 ```
 
 Review at least:

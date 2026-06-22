@@ -31,7 +31,7 @@ class VehicleAssetTests(unittest.TestCase):
         vehicle = Path("config/vehicles/tv3_v1.json")
 
         defined_params = set(
-            re.findall(r"PARAM_DEFINE_(?:INT32|FLOAT)\((RK_[A-Z0-9_]+),", Path("src/modules/flight_modes/tv3_params.c").read_text())
+            re.findall(r"PARAM_DEFINE_(?:INT32|FLOAT)\((RK_[A-Z0-9_]+),", Path("src/modules/vehicle/tv3_params.c").read_text())
         )
 
         with TemporaryDirectory() as tmp:
@@ -91,7 +91,7 @@ class VehicleAssetTests(unittest.TestCase):
             self.assertIn("mavlink stream -d /dev/ttyACM0 -s NAMED_VALUE_FLOAT -r 10", runtime_extras)
             self.assertIn("mavlink stream -d /dev/ttyACM0 -s DEBUG_VECT -r 10", runtime_extras)
             self.assertNotIn("tv3_mode_manager start", runtime_extras)
-            self.assertNotIn("tv3_att_control start", runtime_extras)
+            self.assertNotIn("tv3_attitude_control start", runtime_extras)
             self.assertNotIn("tv3_guidance start", runtime_extras)
             self.assertIn("vehicle_attitude 20", logger_topics)
             self.assertIn("vehicle_local_position_groundtruth 50", logger_topics)
@@ -256,7 +256,9 @@ class VehicleAssetTests(unittest.TestCase):
 
         post = Path("overlay/ROMFS/init.d-posix/airframes/tv3_common.post").read_text()
         self.assertIn("tv3_mode_manager start", post)
-        self.assertIn("tv3_att_control start", post)
+        self.assertIn("tv3_attitude_reference start", post)
+        self.assertIn("tv3_attitude_control start", post)
+        self.assertIn("tv3_tvc_allocator start", post)
         self.assertNotIn("tv3_guidance start", post)
 
         defaults = Path("overlay/ROMFS/init.d-posix/rc.tv3_defaults").read_text()

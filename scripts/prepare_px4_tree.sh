@@ -226,6 +226,9 @@ if "RK_ENABLE" not in mode_management_text:
 
 control_allocator_hpp = worktree / "src/modules/control_allocator/ControlAllocator.hpp"
 control_allocator_hpp_text = control_allocator_hpp.read_text()
+# Note: ActuatorEffectivenessTV3 is still instantiated by the allocator for CA_RK param handling
+# and control_allocator_status, but tv3_mode_manager bypasses its servo outputs and runs the
+# joint projected-GD solver instead.
 if "#include <ActuatorEffectivenessTV3.hpp>" not in control_allocator_hpp_text:
 	control_allocator_hpp_text = control_allocator_hpp_text.replace(
 		"#include <ActuatorEffectivenessHelicopterCoaxial.hpp>\n",

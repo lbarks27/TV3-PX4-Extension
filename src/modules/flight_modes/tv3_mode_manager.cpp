@@ -573,6 +573,7 @@ private:
 			_rail_velocity_m_s = 0.f;
 			reset_engine_sequence();
 			_last_update = 0;
+			for (int i = 0; i < kMaxEngines; ++i) { _last_cmd_p[i] = 0.f; _last_cmd_y[i] = 0.f; }
 		}
 
 		void set_fault(uint32_t fault_reason)
@@ -682,6 +683,7 @@ private:
 				_rail_distance_m = 0.f;
 				_rail_velocity_m_s = 0.f;
 				reset_engine_sequence();
+				for (int i = 0; i < kMaxEngines; ++i) { _last_cmd_p[i] = 0.f; _last_cmd_y[i] = 0.f; }
 			}
 
 		if (_abort_requested) {
@@ -793,9 +795,9 @@ private:
 			engine_command.sequence_active = _mode == tv3_status_s::MODE_IGNITION_PENDING || _mode == tv3_status_s::MODE_BOOST;
 			engine_command.sequence_complete = _sequence_complete;
 
-			// Populate per-engine gimbal commands from the allocator's servo outputs.
-			// These represent the deflections needed for torque (attitude control).
-			// Primary (pitch/roll) and secondary (yaw) are both taken from servos.
+			// Note: allocator servo outputs are no longer the source of truth for gimbal commands
+			// (small-angle linearization + separate splay replaced by joint nonlinear solver below).
+			// We still read them for potential warm-start or degraded fallback.
 			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
 				const int pidx = 2 * i;
 				if (pidx < actuator_servos_s::NUM_CONTROLS) {
@@ -829,133 +831,185 @@ private:
 				}
 			}
 
-			// Apply collective splay using exact nonlinear forward model (accounting for nested axes,
-			// current operating point splay, and actual per-engine thrusts from stagger).
-			// We take allocator's outputs (linear at zero) as starting point, then iteratively
-			// adjust the 6 angles (using the same kinematics as the SIH plant) so the resulting
-			// torques match the desired setpoint while preserving the common splay for thrust.
-			bool can_apply_splay = collective_throttle_mixer_active() && _sequence_complete && _rail_exit;
-			if (can_apply_splay) {
-				const float splay_deg = update_collective_throttle_yaw_deg();
-				const float splay_rad = math::radians(splay_deg);
+			// Joint projected gradient descent allocation solving for torque AND net thrust simultaneously.
+			// Uses the full nonlinear plant kinematics (same as SIH). Bypasses small-angle
+			// ActuatorEffectivenessTV3 servo outputs for command synthesis (allocator may still run for status).
+			_torque_setpoint_sub.update(&_torque_sp);
+			matrix::Vector3f des_tq{_torque_sp.xyz[0], _torque_sp.xyz[1], _torque_sp.xyz[2]};
 
-				// Base from allocator (in command now)
-				float p_rad[4] = {};
-				float y_alloc_rad[4] = {};
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					p_rad[i] = math::radians(engine_command.commanded_pitch_deg[i]);
-					y_alloc_rad[i] = math::radians(engine_command.commanded_yaw_deg[i]);
-				}
-
-				float init_p[4] = {};
-				float init_y[4] = {};  // total secondary = splay + diff
-				float thr[4] = {};
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					init_p[i] = p_rad[i];
-					init_y[i] = y_alloc_rad[i] + splay_rad;
+			float thr[4] = {};
+			int mask = _ignition_mask;
+			float total_ch = 0.f;
+			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
+				if (mask & (1 << i)) {
 					thr[i] = engine_chamber_thrust_n(_engine_state, i);
+					total_ch += thr[i];
 				}
+			}
 
-				// Load/update desired torque
-				_torque_setpoint_sub.update(&_torque_sp);
-				matrix::Vector3f des{_torque_sp.xyz[0], _torque_sp.xyz[1], _torque_sp.xyz[2]};
+			float des_th = total_ch; // aim for max axial by default (near-zero splay)
+			if (_guidance_status.thrust_solution_valid && _guidance_status.required_thrust_n > 0.1f) {
+				des_th = _guidance_status.required_thrust_n;
+			}
 
-				int mask = _ignition_mask;
-
-				// Local helpers using loaded geometry (respects nesting and current splay)
-				auto rot = [](const matrix::Vector3f& v, const matrix::Vector3f& ax, float r) -> matrix::Vector3f {
-					if (fabsf(r) < 1e-6f) return v;
-					matrix::Vector3f k = ax;
-					float nn = k.norm();
-					if (nn > 1e-6f) k /= nn;
-					float c = cosf(r), s = sinf(r);
-					float kdv = k.dot(v);
-					return v * c + k.cross(v) * s + k * kdv * (1.f - c);
-				};
-
-				auto dir_at = [&](int i, float pr, float yr) -> matrix::Vector3f {
-					if (i < 0 || i >= kMaxEngines) return matrix::Vector3f{1.f, 0.f, 0.f};
-					matrix::Vector3f d = _group_thrust[i];
-					if (fabsf(pr) > 1e-6f) d = rot(d, _group_primary[i], pr);
-					if (fabsf(yr) > 1e-6f) {
-						matrix::Vector3f ya = _group_secondary[i];
-						if (fabsf(pr) > 1e-6f) ya = rot(ya, _group_primary[i], pr);
-						d = rot(d, ya, yr);
-					}
-					float n = d.norm();
-					if (n > 1e-6f) d /= n;
-					return d;
-				};
-
-				auto grp_tq = [&](int i, float pr, float yr) -> matrix::Vector3f {
-					if (thr[i] < 0.5f) return matrix::Vector3f{};
-					matrix::Vector3f f = dir_at(i, pr, yr) * thr[i];
-					return _group_pos[i].cross(f);
-				};
-
-				auto tot_tq = [&](const float prs[4], const float yrs[4]) -> matrix::Vector3f {
-					matrix::Vector3f tt{0,0,0};
-					for (int j = 0; j < _engine_count; ++j) {
-						if (mask & (1 << j)) tt += grp_tq(j, prs[j], yrs[j]);
-					}
-					return tt;
-				};
-
-				// Iterative refinement (gradient / coordinate descent on torque error)
-				for (int it = 0; it < 6; ++it) {
-					matrix::Vector3f cur = tot_tq(init_p, init_y);
-					matrix::Vector3f err = des - cur;
-					if (err.norm() < 0.15f) break;
-
-					for (int v = 0; v < _engine_count * 2; ++v) {
-						int j = v / 2;
-						if ((mask & (1 << j)) == 0 || thr[j] < 0.5f) continue;
-						bool is_pri = (v % 2 == 0);
-						float &aa = is_pri ? init_p[j] : init_y[j];
-						float eps = 0.01f;
-						float sav = aa;
-						aa = sav + eps;
-						matrix::Vector3f tp = tot_tq(init_p, init_y);
-						aa = sav - eps;
-						matrix::Vector3f tm = tot_tq(init_p, init_y);
-						aa = sav;
-						matrix::Vector3f dtd = (tp - tm) / (2 * eps);
-						float g = dtd.dot(err);
-						float step = -g / (dtd.norm_squared() + 1e-4f) * 0.7f;
-						aa += step;
-					}
-
-					// clamp
-					for (int j = 0; j < _engine_count; ++j) {
-						init_p[j] = math::constrain(init_p[j], -_group_pmax_rad[j], _group_pmax_rad[j]);
-						init_y[j] = math::constrain(init_y[j], _group_ymin_rad[j], _group_ymax_rad[j]);
-					}
+			// Warm start from previous solution or collective acos guess
+			float p_arr[4] = {};
+			float y_arr[4] = {};
+			bool have_prev = false;
+			for (int i = 0; i < _engine_count; ++i) {
+				if (fabsf(_last_cmd_p[i]) > 1e-6f || fabsf(_last_cmd_y[i]) > 1e-6f) {
+					have_prev = true;
+					break;
 				}
+			}
+			if (have_prev) {
+				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
+					p_arr[i] = _last_cmd_p[i];
+					y_arr[i] = _last_cmd_y[i];
+				}
+			} else if (des_th < total_ch - 0.5f && total_ch > 1.f) {
+				float ratio = math::constrain(des_th / total_ch, 0.f, 1.f);
+				float y0 = acosf(ratio);
+				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
+					if (mask & (1 << i)) y_arr[i] = y0;
+				}
+			}
 
-				// Restore exact common splay (preserve thrust modulation)
-				int na = 0;
-				float sumy = 0.f;
+			// Local kinematics helpers (match tv3_sih / Python plant_* )
+			auto rot = [](const matrix::Vector3f& v, const matrix::Vector3f& ax, float r) -> matrix::Vector3f {
+				if (fabsf(r) < 1e-6f) return v;
+				matrix::Vector3f k = ax;
+				float nn = k.norm();
+				if (nn > 1e-6f) k /= nn;
+				float c = cosf(r), s = sinf(r);
+				float kdv = k.dot(v);
+				return v * c + k.cross(v) * s + k * kdv * (1.f - c);
+			};
+
+			auto dir_at = [&](int i, float pr, float yr) -> matrix::Vector3f {
+				if (i < 0 || i >= kMaxEngines) return matrix::Vector3f{1.f, 0.f, 0.f};
+				matrix::Vector3f d = _group_thrust[i];
+				if (fabsf(pr) > 1e-6f) d = rot(d, _group_primary[i], pr);
+				if (fabsf(yr) > 1e-6f) {
+					matrix::Vector3f ya = _group_secondary[i];
+					if (fabsf(pr) > 1e-6f) ya = rot(ya, _group_primary[i], pr);
+					d = rot(d, ya, yr);
+				}
+				float n = d.norm();
+				if (n > 1e-6f) d /= n;
+				return d;
+			};
+
+			auto grp_tq = [&](int i, float pr, float yr) -> matrix::Vector3f {
+				if ((mask & (1 << i)) == 0 || thr[i] < 0.5f) return matrix::Vector3f{};
+				return _group_pos[i].cross(dir_at(i, pr, yr) * thr[i]);
+			};
+
+			auto tot_tq = [&](const float prs[4], const float yrs[4]) -> matrix::Vector3f {
+				matrix::Vector3f tt{0, 0, 0};
 				for (int j = 0; j < _engine_count; ++j) {
-					if ((mask & (1 << j)) && thr[j] > 0.5f) { sumy += init_y[j]; na++; }
+					tt += grp_tq(j, prs[j], yrs[j]);
 				}
-				if (na > 0) {
-					float avg = sumy / na;
-					float d = splay_rad - avg;
-					for (int j = 0; j < _engine_count; ++j) {
-						if ((mask & (1 << j)) && thr[j] > 0.5f) init_y[j] += d;
-					}
-				}
+				return tt;
+			};
 
-				// write back (final totals)
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					if (_ignition_mask & engine_bit(i)) {
-						engine_command.commanded_pitch_deg[i] = math::degrees(init_p[i]);
-						engine_command.commanded_yaw_deg[i] = math::degrees(init_y[i]);
-						engine_command.commanded_splay_deg[i] = splay_deg;
-					}
+			auto tot_ax = [&](const float prs[4], const float yrs[4]) -> float {
+				float s = 0.f;
+				for (int j = 0; j < _engine_count; ++j) {
+					if ((mask & (1 << j)) == 0 || thr[j] < 0.5f) continue;
+					s += dir_at(j, prs[j], yrs[j])(0) * thr[j];
 				}
+				return s;
+			};
+
+			// Projected GD on angles (joint torque + thrust residual)
+			const float w_f = 0.02f;
+			const float gain = 0.8f;
+			const float eps = 0.002f; // rad
+			const int maxit = 20;
+			const float tq_tol = 0.2f;
+			const float th_tol = 0.5f;
+
+			float best_p[4] = {}, best_y[4] = {};
+			float best_score = 1e30f;
+			matrix::Vector3f best_tq{};
+			float best_ax = 0.f;
+
+			for (int it = 0; it < maxit; ++it) {
+				matrix::Vector3f cur = tot_tq(p_arr, y_arr);
+				float ax = tot_ax(p_arr, y_arr);
+				matrix::Vector3f et = des_tq - cur;
+				float ef = des_th - ax;
+				float sc = et.norm() + w_f * fabsf(ef);
+				if (sc < best_score) {
+					best_score = sc;
+					for (int j = 0; j < kMaxEngines; ++j) { best_p[j] = p_arr[j]; best_y[j] = y_arr[j]; }
+					best_tq = cur;
+					best_ax = ax;
+				}
+				if (et.norm() <= tq_tol && fabsf(ef) <= th_tol) break;
+
+				matrix::Vector3f et_snap = et;
+				float ef_snap = ef;
+				float dpr[4] = {}, dyr[4] = {};
+				for (int v = 0; v < _engine_count * 2; ++v) {
+					int j = v / 2;
+					if ((mask & (1 << j)) == 0 || thr[j] < 0.5f) continue;
+					bool is_p = (v % 2 == 0);
+					float sav = is_p ? p_arr[j] : y_arr[j];
+					float amin = is_p ? -_group_pmax_rad[j] : _group_ymin_rad[j];
+					float amax = is_p ? _group_pmax_rad[j] : _group_ymax_rad[j];
+					// +eps
+					if (is_p) p_arr[j] = sav + eps; else y_arr[j] = sav + eps;
+					matrix::Vector3f tp = tot_tq(p_arr, y_arr);
+					float thp = tot_ax(p_arr, y_arr);
+					// -eps
+					if (is_p) p_arr[j] = sav - eps; else y_arr[j] = sav - eps;
+					matrix::Vector3f tm = tot_tq(p_arr, y_arr);
+					float thm = tot_ax(p_arr, y_arr);
+					// restore
+					if (is_p) p_arr[j] = sav; else y_arr[j] = sav;
+					matrix::Vector3f dt = (tp - tm) / (2 * eps);
+					float da = (thp - thm) / (2 * eps);
+					float g = et_snap.dot(dt) + w_f * ef_snap * da;
+					float d2 = dt.norm_squared() + (w_f * da) * (w_f * da) + 1e-8f;
+					float st = -g / d2 * gain;
+					if (is_p) dpr[j] = st; else dyr[j] = st;
+				}
+				for (int j = 0; j < _engine_count; ++j) {
+					p_arr[j] += dpr[j];
+					y_arr[j] += dyr[j];
+				}
+				for (int j = 0; j < _engine_count; ++j) {
+					p_arr[j] = math::constrain(p_arr[j], -_group_pmax_rad[j], _group_pmax_rad[j]);
+					y_arr[j] = math::constrain(y_arr[j], _group_ymin_rad[j], _group_ymax_rad[j]);
+				}
+			}
+			// adopt best, with sanity fallback to trim
+			bool sane = true;
+			for (int j = 0; j < kMaxEngines; ++j) {
+				if (!PX4_ISFINITE(best_p[j]) || !PX4_ISFINITE(best_y[j])) sane = false;
+			}
+			if (!sane || best_score > 1000.f) {
+				for (int j = 0; j < kMaxEngines; ++j) { p_arr[j] = 0.f; y_arr[j] = 0.f; }
 			} else {
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
+				for (int j = 0; j < _engine_count && j < kMaxEngines; ++j) {
+					p_arr[j] = best_p[j];
+					y_arr[j] = best_y[j];
+				}
+			}
+			// persist for warm start
+			for (int j = 0; j < kMaxEngines; ++j) {
+				_last_cmd_p[j] = p_arr[j];
+				_last_cmd_y[j] = y_arr[j];
+			}
+			// write commands: pitch + total secondary yaw; report splay as the applied secondary for compat
+			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
+				if (_ignition_mask & engine_bit(i)) {
+					engine_command.commanded_pitch_deg[i] = math::degrees(p_arr[i]);
+					engine_command.commanded_yaw_deg[i] = math::degrees(y_arr[i]);
+					engine_command.commanded_splay_deg[i] = math::degrees(y_arr[i]);
+				} else {
 					engine_command.commanded_splay_deg[i] = 0.f;
 				}
 			}
@@ -1084,6 +1138,10 @@ private:
 		float _group_ymin_rad[kMaxEngines]{};
 		float _group_ymax_rad[kMaxEngines]{};
 		float _group_tfrac[kMaxEngines]{};
+
+		// Last solved gimbal commands (deg) for warm-starting the joint projected GD allocator
+		float _last_cmd_p[kMaxEngines]{};
+		float _last_cmd_y[kMaxEngines]{};
 
 		uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};

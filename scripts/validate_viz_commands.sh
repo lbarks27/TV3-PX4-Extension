@@ -32,8 +32,8 @@ run_check() {
 cd "${REPO_ROOT}"
 
 run_check "plot_ulog --list-topics" ./scripts/plot_ulog.sh --latest --list-topics >/dev/null
-run_check "replay trajectory .rrd" ./scripts/tv3_replay.sh --latest --scene trajectory -o "${TMP_ROOT}/trajectory.rrd"
-run_check "replay engines .rrd" ./scripts/tv3_replay.sh --latest --scene engines -o "${TMP_ROOT}/engines.rrd"
+run_check "replay full .rrd (ignores --scene for Rerun; one file with all content)" ./scripts/tv3_replay.sh --latest --scene trajectory -o "${TMP_ROOT}/trajectory.rrd"
+run_check "replay full .rrd via engines scene flag" ./scripts/tv3_replay.sh --latest --scene engines -o "${TMP_ROOT}/engines.rrd"
 run_check "replay trajectory .png" ./scripts/tv3_replay.sh --latest --scene trajectory -o "${TMP_ROOT}/trajectory.png" --time 12.5
 run_check "vehicle overview default" ./scripts/view_vehicle_frame.sh --save "${TMP_ROOT}/vehicle.png"
 

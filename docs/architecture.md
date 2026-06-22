@@ -46,7 +46,7 @@ These are the modules and definitions that run on the flight controller (SITL or
   - `tv3_att_control`: Attitude/rate PID mixer that produces body wrench setpoints (`vehicle_torque_setpoint` / `vehicle_thrust_setpoint`).
   - `tv3_guidance`: Waypoint, hover, landing, and envelope-aware guidance (enabled per-manifest via `guidance.enable`).
   - `tv3_sih`: The simplified deterministic SIH plant used for controller development and gate validation.
-- **Control allocator patch** (`patches/px4/`): Adds TV3-specific effectiveness modeling (`ActuatorEffectivenessTV3`) and related parameters so the PX4 allocator can solve for TVC servo commands. This is currently supplied via patch rather than a pure external module.
+- **Control allocator patch** (`patches/px4/`): Still present for geometry parameters (`CA_RK_*`) and to keep `control_allocator_status` logging; however the small-angle `ActuatorEffectivenessTV3` servo outputs are **bypassed** at runtime. Command synthesis for TVC is performed by a weighted projected-GD joint (torque + thrust) solver inside `tv3_mode_manager` using the full nonlinear kinematics.
 - **Startup / ROMFS overlays** (`overlay/ROMFS/`): Control module start order and enable TV3 behaviors for both POSIX SITL and NuttX hardware images.
 
 ### 2. Vehicle and Scenario Configuration
@@ -111,7 +111,7 @@ Tools that turn ULogs into reviewable artifacts.
   - `scripts/plot_ulog_replay.sh`
   - `scripts/plot_ulog_engines.sh`
 - **Timed playback / scrubber** (Rerun):
-  - `scripts/plot_ulog_replay.sh --rerun`
+  - `scripts/tv3_replay.sh --rerun` (produces one .rrd per sim with trajectory+engines+guidance)
   - Scene builders support trajectory, per-engine thrust, and guidance metrics on a shared `sim_time` timeline
 - Core helpers live in `tools/ulog_replay_common.py`, `tools/viz_common.py`, `tools/rerun_replay.py`, `tools/pyvista_viz.py`, `tools/scene_builders.py`, etc.
 

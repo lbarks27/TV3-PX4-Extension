@@ -25,6 +25,8 @@ from tools.tv3_control_allocator import (
     motor_reference_from_thrust,
     vehicle_full_thrust_n,
 )
+# NOTE: guidance_reachability now uses the live projected-GD joint (torque+thrust) allocator
+# implementation (see allocate_projected_gradient). Grid search retained only for reference.
 
 GRAVITY_MPS2 = 9.80665
 

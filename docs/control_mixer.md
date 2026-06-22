@@ -3,12 +3,18 @@
 This document describes the control stack for the triple-engine splay-throttle lander
 (`tv3_lander_v1`). The stack is split across two layers:
 
-1. An attitude **mixer** (`tv3_att_control`) that produces wrench setpoints.
-2. PX4's **control allocator** (`ActuatorEffectivenessTV3`) that maps those setpoints
-   onto per-engine TVC actuators.
+1. An attitude **mixer** (`tv3_att_control`) that produces body torque setpoints.
+2. A **joint projected-GD solver** inside `tv3_mode_manager` that maps the torque
+   demand + guidance thrust demand onto per-engine TVC (roll + yaw) commands using the
+   full nonlinear plant.
 
-The single-engine ascent vehicle (`tv3_v1`) uses the same attitude mixer and allocator
-airframe type, but with one TVC group and no splay throttle.
+The stock PX4 `control_allocator` + `ActuatorEffectivenessTV3` still execute (for
+parameter geometry and logging), but their servo outputs are not used to synthesize
+commands.
+
+The single-engine ascent vehicle (`tv3_v1`) uses the same attitude mixer; the joint
+solver degenerates gracefully with thrust error down-weighted or disabled when splay
+is not available.
 
 ## Architecture
 
@@ -19,6 +25,7 @@ flowchart LR
         RATE[vehicle_angular_velocity]
         TRAJ[trajectory_setpoint]
         STATUS[tv3_status]
+        GUIDS[tv3_guidance_status]
     end
 
     subgraph mixer["tv3_att_control (control mixer)"]
@@ -26,15 +33,13 @@ flowchart LR
         GUID[Guidance tilt reference]
     end
 
-    subgraph alloc["PX4 control_allocator"]
-        EFF[ActuatorEffectivenessTV3]
-        SOLVE[Pseudo-inverse solver]
+    subgraph solver["tv3_mode_manager (joint projected GD)"]
+        JGD[Nonlinear plant + weighted PG on 2N angles]
     end
 
     subgraph outputs
         TQ[vehicle_torque_setpoint]
-        TH[vehicle_thrust_setpoint]
-        SERVO[TVC servo outputs]
+        TH[vehicle_thrust_setpoint = 0]
         ENG[tv3_engine_command]
     end
 
@@ -42,10 +47,11 @@ flowchart LR
     RATE --> PID
     TRAJ --> GUID --> PID
     STATUS --> PID
+    GUIDS --> JGD
     PID --> TQ
     PID --> TH
-    TQ --> EFF --> SOLVE --> SERVO
-    SOLVE --> ENG
+    TQ --> JGD
+    GUIDS --> JGD --> ENG
 ```
 
 SITL startup order from `overlay/ROMFS/init.d-posix/airframes/tv3_common.post`:
@@ -57,6 +63,9 @@ tv3_load_cell start
 tv3_mode_manager start
 tv3_att_control start
 ```
+
+(Note: `control_allocator` still starts for parameter loading and `control_allocator_status`
+logging, but its servo outputs are not used for TVC command synthesis.)
 
 ## Layer 1: `tv3_att_control` — attitude mixer
 
@@ -115,27 +124,45 @@ When `RK_GD_ENABLE=1`, horizontal velocity and position commands from
 Tilt magnitude is `horiz_speed × RK_ATT_TILT_GAIN`, capped at `RK_ATT_TILT_MAX`
 (default 20°). This steers thrust laterally without bypassing the attitude loop.
 
-## Layer 2: PX4 control allocator — per-engine TVC mixing
+## Layer 2: Joint projected-gradient allocation (torque + thrust)
 
-The patched PX4 allocator (`CA_AIRFRAME=16`, `ActuatorEffectivenessTV3` in
-`patches/px4/0001-tv3-control-allocation.patch`) takes `vehicle_torque_setpoint`
-and solves for per-engine pitch and yaw servo deflections.
+TV3 does **not** use the stock PX4 allocator's servo outputs as the source of gimbal
+commands for flight. The allocator (`ActuatorEffectivenessTV3`) and its small-angle
+linearization still run (for `control_allocator_status` and geometry params), but
+`tv3_mode_manager` ignores those servos for synthesis and instead runs a live
+weighted projected gradient descent solver at 100 Hz that jointly solves for
+per-engine roll/yaw angles to achieve both the desired body torque **and** the
+net axial thrust.
 
-### Effectiveness model
+### Why joint nonlinear allocation
 
-For each TVC group the allocator builds two servo actuators using a small-angle
-linearization:
+- The small-angle model `τ ≈ T_ref·θ_max·(r × (â × t̂))` only holds near zero deflection.
+- Net thrust is produced by collective secondary-axis deflection ("splay"), which
+  immediately invalidates the linearization used by the allocator.
+- Previously a post-hoc splay bias was added and a torque-only refinement performed,
+  followed by a "restore common splay" step. Thrust and torque were never optimized
+  together and the final commands could sacrifice one for the other.
 
-```text
-τ = T_ref × thrust_fraction × θ_max × (r × (gimbal_axis × thrust_axis))
-```
+The new solver:
 
-A gimbal rotation about `gimbal_axis` deflects thrust by approximately
-`gimbal_axis × thrust_axis`. Torque comes from the lever arm `r` (engine mount
-position relative to the vehicle CG).
+- Uses the exact nonlinear forward model (`plant_thrust_direction` / Rodrigues
+  rotations + `r × F`) already used by `tv3_sih`.
+- Minimizes a weighted residual combining torque error (Nm) and axial thrust error (N).
+- Respects actuator limits by projection after each step.
+- Is warm-started from the previous solution (or a collective-splay guess).
+- Replaces allocator-scale + splay + torque-only refine + splay-restore entirely.
 
-Firmware implementation: `ActuatorEffectivenessTV3::computeTorque()` in the PX4
-patch. Host mirror: `flight_effectiveness_torque()` in `tools/tv3_control_allocator.py`.
+Host reference implementation (and offline checker): `allocate_projected_gradient()` in
+`tools/tv3_control_allocator.py`. The public `allocate()` now delegates to it.
+
+Default weighting makes a 1 N thrust error roughly comparable to a 0.02 Nm torque
+error in the combined cost (matching historical scoring). The implementation uses a
+smooth quadratic proxy on the 4-D residual with coordinate-wise normalized steps
+and projection. 
+
+Firmware: implemented inside `tv3_mode_manager::publish_outputs`. The same
+kinematics helpers (`dir_at`, `grp_tq`, `tot_*`) are used so that the plant, host
+checker, and flight solver are bit-compatible for a given (thrusts, angles).
 
 ### Per-engine geometry (`tv3_lander_v1`)
 
@@ -181,41 +208,32 @@ plant (`src/modules/simulation/tv3_sih/tv3_sih.cpp`).
 See also [Hardware Flight Workflow](hardware_flight_workflow.md) for the preflight
 parameter checklist.
 
-## Layer 3: Splay — throttle (not allocator output)
+## Layer 3: Throttle via splay is now part of the joint solve
 
-Each lander engine has a **third DOF: splay** (0–35°), which is the throttle
-mechanism. Thrust magnitude follows cosine loss:
+Splay (collective secondary deflection) is still the physical throttle mechanism and
+produces the same cosine axial loss. However, the **commanded angles are no longer
+computed as "allocator differential + common splay bias"**. The projected GD solver
+directly optimizes the 6 (or N×2) absolute gimbal angles; the resulting secondary
+angles implicitly contain both the common-mode needed for the thrust target and the
+differential needed for torque. Reported `commanded_splay_deg[]` is currently set to
+the per-engine secondary command (or its mean in future telemetry) for continuity
+with log viewers.
 
-```text
-T_actual = T_nominal × cos(splay_deg)
-```
-
-With Aerotech G12 motors at the current catalog values:
-
-| Condition | Total thrust (3 engines) |
-|-----------|--------------------------|
-| Splay = 0° (full throttle) | **92.6 N** (~30.9 N each) |
-| Splay = 35° (min throttle) | **75.9 N** |
-
-Net thrust can only be reduced ~18% via splay alone. Demanding less than ~76 N with
-all engines active is **unreachable** — the host allocator returns
-`net thrust outside splay envelope`.
-
-Splay (collective secondary-axis deflection for thrust modulation) is applied in
-`tv3_mode_manager` as a **common-mode bias added to the allocator's secondary-axis
-commands**. The secondary actuator is shared (splay is not an independent DOF).
-Allocator commands provide the differential for attitude torques; splay provides
-the common component for net thrust reduction. The final `commanded_yaw_deg[]`
-(and `commanded_splay_deg[]`) therefore contain `allocator_secondary + splay_common`
-for each engine. This prevents splay from disabling attitude authority on the
-secondary mount actuator.
+The physical limits and envelope (full vs. min splayed thrust) are unchanged and are
+still enforced before/around the solver. The solver simply finds the best feasible
+point inside the actuator box for the weighted (torque, thrust) objective.
 
 ## Host-side reachability checker
 
-`tools/tv3_control_allocator.py` mirrors the firmware allocator small-angle model and
-the SIH plant splay/pitch/yaw thrust model. It uses a bounded grid search over
-per-engine `(roll, yaw, splay)` commands to check whether a wrench demand is
-physically achievable.
+`tools/tv3_control_allocator.py` now contains the authoritative **projected gradient
+descent** solver (`allocate_projected_gradient`) that the firmware uses for command
+generation. It operates on the exact nonlinear plant model and supports the same
+weighted joint (torque + thrust) objective. The old grid search is superseded for
+production checks (the public `allocate()` delegates to PG); a coarse grid is still
+available in the module for cross-validation if needed.
+
+The pre-solve envelope checks (thrust range, torque limits) and unreachable reasons
+are unchanged.
 
 Run the Phase 4 gate:
 
@@ -223,7 +241,7 @@ Run the Phase 4 gate:
 ./scripts/check_control_mixer.sh
 ```
 
-Or query a specific demand directly:
+Query via CLI (now exercises the PG solver):
 
 ```bash
 python3 tools/tv3_allocator.py \
@@ -236,13 +254,14 @@ python3 tools/tv3_allocator.py \
 
 | Scenario | Expected result |
 |----------|-----------------|
-| Nominal hover (zero torque, full thrust) | Reachable; all gimbals at trim |
-| Thrust below splay floor (~40 N) | Unreachable (`net thrust outside splay envelope`) |
+| Nominal hover (zero torque, full thrust) | Reachable; near-trim angles |
+| Partial thrust (splay regime) + zero torque | Reachable within tolerance; common secondary deflection found jointly |
+| Thrust below splay floor | Unreachable (`net thrust outside splay envelope`) pre-solve |
 | One engine failed, full thrust demanded | Unreachable (reduced envelope) |
-| Burnout-scaled thrust (~55%) | Still hoverable |
-| Excessive lateral guidance demand | Torque envelope rejection |
+| Burnout-scaled thrust | Still hoverable |
+| Excessive lateral demand | Torque envelope rejection |
 
-Unit tests live in `tests/test_control_allocator.py`.
+Unit tests live in `tests/test_control_allocator.py` (including dedicated PG cases).
 
 ## SIH simulation bridge
 
@@ -273,13 +292,14 @@ plotting workflow.
 
 | Layer | Module | Role |
 |-------|--------|------|
-| Attitude mixer | `tv3_att_control` | PID → torque + normalized thrust setpoints |
-| Per-engine mixer | PX4 `control_allocator` + `ActuatorEffectivenessTV3` | Torque → 6 servo commands (roll+yaw × 3 engines) |
-| Throttle | Splay mechanism + `tv3_guidance` | Cosine-loss thrust modulation, 92.6→75.9 N range |
-| Validation | `tv3_control_allocator.py` | Offline envelope + grid allocation checks |
-| Plant | `tv3_sih` | Full nonlinear gimbal kinematics + splay |
+| Attitude mixer | `tv3_att_control` | PID → torque (thrust SP remains zero) |
+| Joint nonlinear allocator | `tv3_mode_manager` (projected GD) | Solves 2N gimbal angles for torque vector + net axial thrust using full plant |
+| Throttle | Emergent from secondary-axis solution | Cosine loss realized by the thrust component of the joint objective |
+| Validation | `tools/tv3_control_allocator.py` (projected GD) | Offline envelope + weighted joint reachability |
+| Plant | `tv3_sih` | Full nonlinear gimbal kinematics |
 
 The triple-engine lander uses **differential gimbaling** across three offset nozzles to
-generate pitch, yaw, and roll torque, with **splay** as a shared throttle axis. The
-attitude mixer decides *what wrench* is needed; the allocator decides *how to split it
-across six gimbal servos* subject to geometry, thrust fraction, and deflection limits.
+generate pitch, yaw, and roll torque. Net thrust (throttle) is obtained from the same
+secondary-axis actuators. The attitude mixer decides the wrench; `tv3_mode_manager`
+runs the joint projected GD solver that finds the actuator angles best satisfying
+both torque and thrust under the nonlinear kinematics and limits.

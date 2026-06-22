@@ -13,7 +13,7 @@ This repo supports a PX4-first data path for detailed SITL, flight, and ground-t
 |----------|------|-------------|
 | Live SITL 3D pose | **Hawkeye** | `./scripts/run_hawkeye.sh` |
 | Interactive 3D spatial review (no timeline) | **PyVista** | `./scripts/view_vehicle_frame.sh`, `./scripts/tv3_replay.sh` |
-| Timed log playback (scrubbable timeline) | **Rerun** | `./scripts/tv3_replay.sh --latest --scene trajectory` (or `engines`, `guidance`, `all`) |
+| Timed log playback (scrubbable timeline) | **Rerun** | `./scripts/tv3_replay.sh --latest --rerun` (one file per sim with full content) |
 | Static PNG export | **PyVista** | `./scripts/tv3_replay.sh -o *.png` or `view_vehicle_frame.sh --save` |
 | Static 2D ULog timeseries review | **Matplotlib** | `./scripts/plot_ulog.sh` |
 
@@ -165,39 +165,43 @@ Camera presets for PyVista: `iso`, `top`, `side`, `front`, `forward_up`, `overvi
 
 Use Rerun when you want to scrub through time. Guidance metrics are Rerun-only (no PyVista 3D scene).
 
-```bash
-./scripts/plot_ulog_replay.sh --latest --rerun
-./scripts/plot_ulog_replay.sh --latest --scene all -o /tmp/tv3_unified.rrd
-./scripts/plot_ulog_replay.sh --latest --scene guidance
-./scripts/plot_ulog_engines.sh --latest --rerun
-```
-
-`--scene all` writes one Rerun recording with trajectory, per-engine thrust, and guidance metrics on a shared `sim_time` timeline (seconds from log start).
-
-Save a recording for offline review (headless, no viewer window):
+**One file per sim, with everything.** Rerun exports always include the full content (vehicle trajectory + attitude, engine gimbal angles + live thrust vectors, and guidance scalars like required/measured thrust and margins) on a single `sim_time` timeline. There are no separate per-section `.rrd` files.
 
 ```bash
-./scripts/plot_ulog_replay.sh --latest --rerun -o /tmp/tv3_trajectory.rrd
-./scripts/plot_ulog_replay.sh --latest --scene guidance -o /tmp/tv3_guidance.rrd
-./scripts/plot_ulog_engines.sh --latest --rerun -o /tmp/tv3_engines.rrd
+./scripts/tv3_replay.sh --latest --rerun
+./scripts/tv3_replay.sh --latest --rerun -o /tmp/myflight.rrd
 ```
 
-Re-open a saved recording:
+Save a recording for offline review (headless, no viewer spawn):
 
 ```bash
-rerun /tmp/tv3_trajectory.rrd
+./scripts/tv3_replay.sh --latest -o /tmp/myflight.rrd
 ```
 
-Or invoke the venv binary directly:
+Re-open a saved recording (always use the viewer that matches the SDK version that wrote it):
 
 ```bash
-../.work/tv3-viz-venv/bin/rerun /tmp/tv3_trajectory.rrd
+rerun /tmp/myflight.rrd
 ```
+
+Or invoke the venv's matching binary directly (recommended if you have multiple rerun installs):
+
+```bash
+../.work/tv3-viz-venv/bin/rerun /tmp/myflight.rrd
+```
+
+**Important: Rerun version skew causes "old .rrd file" / codec errors.**
+
+- The viz tools are pinned to a specific `rerun-sdk` (and matching `rerun` CLI) in `requirements-viz.txt`.
+- The RRD format is not compatible across major SDK versions.
+- Always launch via the repo wrappers (`./scripts/tv3_replay.sh ...`). They activate the viz venv and put its `rerun` first on `$PATH`.
+- After changing the pin or on first setup: `./scripts/setup_viz_env.sh`
+- If you see "You are trying to load an old .rrd file", you are opening the file with a mismatched viewer. Use the venv one or re-export with the matching writer.
 
 Pass an explicit log path instead of `--latest`:
 
 ```bash
-./scripts/plot_ulog_replay.sh logs/sim/YYYY-MM-DD/<run-id>/HH_MM_SS.ulg
+./scripts/tv3_replay.sh logs/sim/YYYY-MM-DD/<run-id>/HH_MM_SS.ulg --rerun
 ```
 
 ## 2D Timeseries Review (Matplotlib)

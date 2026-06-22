@@ -488,7 +488,69 @@ def allocate(
     torque_tolerance_nm: float = 0.5,
     thrust_tolerance_frac: float = 0.05,
 ) -> AllocationResult:
-    """Bounded grid solver for torque and net thrust with explicit unreachable results."""
+    """Joint torque+thrust allocator using projected gradient descent on the nonlinear plant.
+
+    The previous bounded grid implementation has been superseded by allocate_projected_gradient
+    (live weighted solver for both torque and net thrust). grid_steps is accepted for
+    backwards compatibility with callers but is ignored.
+    """
+    thrust_tolerance = max(1.0, abs(desired_thrust_n) * thrust_tolerance_frac)
+    # Delegate to the projected GD implementation (the grid solver is kept only for reference/cross-check).
+    return allocate_projected_gradient(
+        engines,
+        desired_torque_nm,
+        desired_thrust_n,
+        active_mask=active_mask,
+        thrust_scales=thrust_scales,
+        torque_limits=torque_limits,
+        torque_weight=1.0,
+        thrust_weight=0.02,
+        max_iters=20,
+        step_gain=0.8,
+        fd_eps_deg=0.05,
+        torque_tolerance_nm=torque_tolerance_nm,
+        thrust_tolerance_n=thrust_tolerance,
+    )
+
+
+def allocate_projected_gradient(
+    engines: Sequence[EngineGeometry],
+    desired_torque_nm: Sequence[float],
+    desired_thrust_n: float,
+    *,
+    active_mask: int | None = None,
+    thrust_scales: Sequence[float] | None = None,
+    torque_limits: TorqueLimits | None = None,
+    torque_weight: float = 1.0,
+    thrust_weight: float = 0.02,
+    max_iters: int = 20,
+    step_gain: float = 0.8,
+    fd_eps_deg: float = 0.05,
+    torque_tolerance_nm: float = 0.2,
+    thrust_tolerance_n: float = 0.5,
+) -> AllocationResult:
+    """Projected gradient descent solver for joint torque + net axial thrust allocation.
+
+    This is the live replacement for small-angle linear allocation + post-hoc splay.
+
+    Design (4D residual + projected GD):
+    - Decision variables: per-active-engine (roll_deg, yaw_deg) commands.
+    - Forward model: exact nonlinear plant_* (Rodrigues rotations for nested gimbal axes,
+      torque = pos cross (dir * chamber_thrust), axial = dir_x * chamber).
+    - Residual: et = desired_torque - achieved_torque (3), ef = desired_thrust - achieved_axial (1).
+    - Weighted quadratic proxy minimized: 0.5*wt*||et||^2 + 0.5*(thrust_weight * ef)^2
+      (gradient contribution: et·dt + thrust_weight*ef*df ).
+    - Projection: after each update, clamp every angle to its engine's [min, max].
+    - Thrust magnitude per engine is its current .thrust_n (chamber); inactive engines (thrust_n<0.5 or mask)
+      contribute 0 and are not varied.
+    - Initialization: common secondary-axis "splay" guess via collective_throttle_yaw_deg (good for
+      thrust-dominant cases), rolls=0. GD then finds differential adjustments that also satisfy torque.
+    - No "splay restore" step: the solver is free to shift common mode slightly if it reduces weighted error.
+    - Early exit when within tolerances; otherwise returns best achieved after max_iters with reachable=False.
+    - Defaults chosen so thrust_weight=0.02 makes ~1N thrust error comparable to ~0.02 "Nm" in the
+      combined metric, matching historical grid score weighting (torque_norm + 0.02*thrust_err).
+    - This uses the same kinematics as tv3_sih and the old grid allocate, ensuring parity.
+    """
     working = scaled_engines(engines, active_mask=active_mask, thrust_scales=thrust_scales)
     if not engines:
         return AllocationResult(
@@ -530,44 +592,143 @@ def allocate(
             result.control_unreachable_reason = CONTROL_TORQUE_ENVELOPE
             return result
 
-    best: AllocationResult | None = None
-    thrust_tolerance = max(1.0, abs(desired_thrust_n) * thrust_tolerance_frac)
+    n = len(working)
+    # Warm start: collective splay guess for thrust, zero differential roll
+    y0 = 0.0
+    if desired_thrust_n > 1e-3 and n > 0:
+        y0 = collective_throttle_yaw_deg(desired_thrust_n, working)
+    rolls = [0.0] * n
+    yaws = [y0] * n
 
-    for commands in itertools.product(*(command_grid(engine, grid_steps) for engine in working)):
-        torque = (0.0, 0.0, 0.0)
-        thrust = 0.0
-        saturated = False
-        for engine, command in zip(working, commands):
-            roll, yaw = command
-            torque = add(torque, plant_torque(engine, roll, yaw))
-            thrust += plant_axial_thrust(engine, roll, yaw)
-            saturated = saturated or _command_saturated(engine, command)
+    best_score = math.inf
+    best_rolls: list[float] = rolls[:]
+    best_yaws: list[float] = yaws[:]
+    best_tq: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    best_th: float = 0.0
 
-        torque_error = norm(sub(torque, desired))
-        thrust_error = abs(thrust - desired_thrust_n)
-        score = torque_error + thrust_error * 0.02
-        candidate = AllocationResult(
-            reachable=False,
-            score=score,
-            torque_error_nm=torque_error,
-            thrust_error_n=thrust_error,
-            achieved_torque_nm=torque,
-            achieved_thrust_n=thrust,
-            unallocated_torque_nm=sub(desired, torque),
-            commands=commands,
-            saturated=saturated,
-            full_thrust_n=full_thrust,
-            min_splayed_thrust_n=min_splayed,
-        )
-        if best is None or candidate.score < best.score:
-            best = candidate
+    for it in range(max_iters):
+        tq = (0.0, 0.0, 0.0)
+        th = 0.0
+        for e, r, y in zip(working, rolls, yaws):
+            if e.thrust_n < 0.5:
+                continue
+            tq = add(tq, plant_torque(e, r, y))
+            th += plant_axial_thrust(e, r, y)
+        et = sub(desired, tq)
+        ef = desired_thrust_n - th
 
-    assert best is not None
-    best.reachable = best.torque_error_nm <= torque_tolerance_nm and best.thrust_error_n <= thrust_tolerance
-    if not best.reachable:
-        best.reason = REASON_TORQUE_UNREACHABLE
-        best.control_unreachable_reason = CONTROL_TORQUE_ENVELOPE
-    return best
+        score = norm(et) + thrust_weight * abs(ef)
+        if score < best_score:
+            best_score = score
+            best_rolls = rolls[:]
+            best_yaws = yaws[:]
+            best_tq = tq
+            best_th = th
+
+        et_norm = norm(et)
+        if et_norm <= torque_tolerance_nm and abs(ef) <= thrust_tolerance_n:
+            # converged sufficiently
+            break
+
+        # Snapshot et, ef for this iter (for stable grad direction)
+        et_snap = et
+        ef_snap = ef
+
+        # Compute finite-diff gradients for each angle; propose steps
+        delta_r = [0.0] * n
+        delta_y = [0.0] * n
+        for v in range(n * 2):
+            j = v // 2
+            if (working[j].thrust_n < 0.5):
+                continue
+            is_roll = (v % 2 == 0)
+            if is_roll:
+                amin = working[j].roll_min_deg
+                amax = working[j].roll_max_deg
+                sav = rolls[j]
+            else:
+                amin = working[j].yaw_min_deg
+                amax = working[j].yaw_max_deg
+                sav = yaws[j]
+            eps = fd_eps_deg
+            # +eps
+            if is_roll:
+                rolls[j] = sav + eps
+            else:
+                yaws[j] = sav + eps
+            tp = (0.0, 0.0, 0.0)
+            thp = 0.0
+            for ee, rr, yy in zip(working, rolls, yaws):
+                if ee.thrust_n < 0.5:
+                    continue
+                tp = add(tp, plant_torque(ee, rr, yy))
+                thp += plant_axial_thrust(ee, rr, yy)
+            # -eps
+            if is_roll:
+                rolls[j] = sav - eps
+            else:
+                yaws[j] = sav - eps
+            tm = (0.0, 0.0, 0.0)
+            thm = 0.0
+            for ee, rr, yy in zip(working, rolls, yaws):
+                if ee.thrust_n < 0.5:
+                    continue
+                tm = add(tm, plant_torque(ee, rr, yy))
+                thm += plant_axial_thrust(ee, rr, yy)
+            # restore
+            if is_roll:
+                rolls[j] = sav
+            else:
+                yaws[j] = sav
+            dtq = scale(sub(tp, tm), 1.0 / (2 * eps))
+            dth = (thp - thm) / (2 * eps)
+            # g for J ~ 0.5||et||^2 + 0.5*(thrust_w * ef)^2 proxy
+            g = dot(et_snap, dtq) + thrust_weight * ef_snap * dth
+            d2 = dot(dtq, dtq) + (thrust_weight * dth) * (thrust_weight * dth) + 1e-8
+            step = -g / d2 * step_gain
+            if is_roll:
+                delta_r[j] = step
+            else:
+                delta_y[j] = step
+
+        # apply + project
+        for j in range(n):
+            rolls[j] = constrain(rolls[j] + delta_r[j], working[j].roll_min_deg, working[j].roll_max_deg)
+            yaws[j] = constrain(yaws[j] + delta_y[j], working[j].yaw_min_deg, working[j].yaw_max_deg)
+
+    # final eval on best
+    tq = (0.0, 0.0, 0.0)
+    th = 0.0
+    saturated = False
+    for e, r, y in zip(working, best_rolls, best_yaws):
+        tq = add(tq, plant_torque(e, r, y))
+        th += plant_axial_thrust(e, r, y)
+        if _command_saturated(e, (r, y)):
+            saturated = True
+    et = sub(desired, tq)
+    ef = desired_thrust_n - th
+    torque_err = norm(et)
+    thrust_err = abs(ef)
+    score = torque_err + thrust_weight * thrust_err
+
+    commands = tuple((float(r), float(y)) for r, y in zip(best_rolls, best_yaws))
+    res = AllocationResult(
+        reachable=(torque_err <= torque_tolerance_nm and thrust_err <= thrust_tolerance_n),
+        score=score,
+        torque_error_nm=torque_err,
+        thrust_error_n=thrust_err,
+        achieved_torque_nm=tq,
+        achieved_thrust_n=th,
+        unallocated_torque_nm=et,
+        commands=commands,
+        saturated=saturated,
+        full_thrust_n=full_thrust,
+        min_splayed_thrust_n=min_splayed,
+    )
+    if not res.reachable:
+        res.reason = REASON_TORQUE_UNREACHABLE
+        res.control_unreachable_reason = CONTROL_TORQUE_ENVELOPE
+    return res
 
 
 def allocate_from_vehicle(

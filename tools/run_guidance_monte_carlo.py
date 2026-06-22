@@ -19,6 +19,7 @@ from tools.tv3_guidance_envelope import (  # noqa: E402
     evaluate_profile_case,
     run_monte_carlo,
 )
+# The envelope checks (and thus MC) use the projected GD joint allocator for control reachability.
 
 
 def main() -> None:

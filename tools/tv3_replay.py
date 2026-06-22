@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Unified TV3 ULog replay CLI: trajectory, engines, guidance, and unified Rerun timelines."""
+"""Unified TV3 ULog replay CLI: trajectory, engines, guidance.
+
+For Rerun (--rerun or -o *.rrd) a single recording per sim is produced containing
+all data (3D trajectory/attitude, engine gimbals + thrust vectors, guidance scalars)
+on the 'sim_time' timeline. Use --scene only to select PyVista 3D views or PNGs."""
 
 from __future__ import annotations
 
@@ -273,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scene",
         choices=("trajectory", "guidance", "engines", "all"),
         default="trajectory",
-        help="Replay scene to render; all combines trajectory+engines+guidance in Rerun (default: %(default)s)",
+        help="Scene for PyVista (interactive or PNG). Rerun output (--rerun or -o *.rrd) always produces one file per sim with full content (trajectory+engines+guidance). Default: %(default)s",
     )
     parser.add_argument("--vehicle", type=Path, help="Vehicle manifest JSON (engines scene only)")
     parser.add_argument("-o", "--output", type=Path, help="Export .rrd (Rerun) or .png (PyVista snapshot)")
@@ -335,6 +339,9 @@ def _recording_path(output: Path | None, log_path: Path, scene: str) -> Path | N
         return output
     if output.suffix.lower() == ".png":
         return None
+    if scene == "all":
+        # One canonical rerun file per sim, containing everything.
+        return log_path.with_name(f"{log_path.stem}.tv3.rrd")
     return default_output_path(log_path, scene, ".rrd")
 
 
@@ -361,6 +368,11 @@ def _strip_scene_flag(tokens: Sequence[str]) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = _argv_tokens(argv)
     args = build_parser().parse_args(raw_argv)
+
+    # Rerun always gets the complete sim in a *single* file (trajectory + engines + guidance
+    # on the shared sim_time timeline). --scene only affects PyVista interactive/PNG views.
+    if args.rerun or (args.output and args.output.suffix.lower() == ".rrd"):
+        args.scene = "all"
 
     if args.scene == "engines":
         from tools.plot_ulog_engines import run_engines_replay
@@ -390,7 +402,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not trajectory_frames and not engine_frames and not guidance_frames:
             raise SystemExit("no frames could be built from the ULog for unified replay")
         print(format_replay_sampling(trajectory_frames or engine_frames or guidance_frames, fps=args.fps))
-        unified_recording = _recording_path(args.output, log_path, "unified")
+        unified_recording = _recording_path(args.output, log_path, args.scene)
         replay_unified(
             trajectory_frames,
             guidance_frames,

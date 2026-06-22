@@ -39,7 +39,7 @@ Vehicle manifests and flight profiles are JSON under `config/vehicles/*.json` an
 ./scripts/validate_viz_commands.sh            # optional headless smoke test
 ./scripts/plot_ulog.sh --latest               # 2D timeseries PNG
 ./scripts/tv3_replay.sh --latest              # interactive 3D trajectory (PyVista)
-./scripts/tv3_replay.sh --latest --rerun      # timed playback (Rerun)
+./scripts/tv3_replay.sh --latest --rerun      # timed playback (Rerun; one file with full sim content)
 ```
 
 Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_v1.json`. Load a scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/single_engine_ascent.json`.
@@ -212,7 +212,7 @@ The SIH plant (`tv3_sih`) and the TV3 PX4 extension prioritize deterministic, fa
 - **Custom modules**: `tv3_mode_manager`, `tv3_guidance`, `tv3_att_control`, `tv3_motor_model`, load-cell modules, and `tv3_sih` implement TV3-specific behaviors (solid-motor ignition confirmation via load cell, splay-as-throttle, custom command 31010, per-engine state, mass reporting from curves). Stock PX4 components are reused (control allocator via CA_RK, attitude, uORB pubs, SITL sensors) where possible.
 - **Dual parameter sets**: `CA_RK_*` (for patched `ActuatorEffectivenessTV3` and allocator) + `RK_*` (for TV3 modules). Both are generated from the same vehicle manifest by `tools/generate_vehicle_assets.py`. This duplication exists because the allocator lives in a PX4 patch.
 - **Manifest richness vs runtime use**: `config/vehicles/*.json` contains detailed `physical_model` (links, joints, inertias about origin, CAD refs) for intake, validation (`check_physical_manifests.sh`), and future use. Runtime only consumes a flattened subset via generated params + `tv3_motor_model` curves.
-- **Allocator implementation**: TV3 effectiveness is supplied by a ~772-line patch (`patches/px4/0001-tv3-control-allocation.patch`) adding `EffectivenessSource::TV3` and `ActuatorEffectivenessTV3`. Not yet an upstream or pure external module.
+- **Allocator implementation**: The patch is retained for `CA_RK_*` parameter schema and `control_allocator_status`. Actual TVC commands are produced by the joint nonlinear projected-GD solver in `tv3_mode_manager` (bypassing the small-angle pseudo-inverse outputs).
 - **Model duplication (thrust selection, splay, geometry)**:
   - Thrust fallback (filtered → measured → expected) is reimplemented in C++ modules and mirrored in Python tools for offline checks.
   - Collective splay yaw computation (`collective_throttle_yaw_deg` using acos or search) exists in `tv3_mode_manager` and the Python allocator/reference.

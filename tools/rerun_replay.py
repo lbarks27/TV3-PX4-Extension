@@ -28,7 +28,10 @@ from tools.ulog_replay_common import (
 from tools.vehicle_mesh import rerun_mesh_from_path, resolve_vehicle_mesh
 from tools.viz_common import ENGINE_COLORS
 
-MISSING_DEP_MSG = "missing dependency: install rerun-sdk with `python3 -m pip install -r requirements-viz.txt`"
+MISSING_DEP_MSG = (
+    "missing dependency: run ./scripts/setup_viz_env.sh (it installs the pinned rerun-sdk + matching viewer). "
+    "Do not pip install rerun-sdk globally or into other venvs; Rerun .rrd files are not readable across SDK versions."
+)
 
 # Rerun also creates an automatic wall-clock `log_time` timeline (~milliseconds for export).
 # Use a dedicated name so replay spans match archived ULog sim duration (seconds).
@@ -107,6 +110,8 @@ def log_replay_instructions() -> None:
                     "TV3 ULog replay",
                     f"Select the '{SIM_TIME_TIMELINE}' timeline in the time panel (not log_time).",
                     "sim_time is seconds from log start and matches archived ULog duration.",
+                    "Open this .rrd with the rerun viewer from the same SDK version used to write it",
+                    "(use the repo scripts or ../.work/tv3-viz-venv/bin/rerun).",
                 ]
             )
         ),

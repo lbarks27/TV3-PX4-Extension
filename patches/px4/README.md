@@ -2,7 +2,7 @@
 
 This directory carries the core upstream PX4 delta needed by the extension:
 
-- `0001-tv3-control-allocation.patch` — supplies `ActuatorEffectivenessTV3`, the TV3 airframe type (16), related parameters, and control allocation wiring.
+- `0001-tv3-control-allocation.patch` — supplies the TV3 airframe type (16), `CA_RK_*` parameter schema, and minimal allocator wiring so that `control_allocator` can still be instantiated for logging and param population. The small-angle `ActuatorEffectivenessTV3` effectiveness is **not used** for servo command synthesis; `tv3_mode_manager` performs a joint nonlinear projected-GD solve for torque + net thrust instead.
 - `0002-tv3-qgc-flight-modes.patch` — when `RK_ENABLE=1`, limits PX4 `AVAILABLE_MODES` to a non-selectable Manual placeholder so QGC stops listing multicopter flight modes for `MAV_TYPE_ROCKET`.
 - `0004-ads1115-differential-loadcell.patch` — retunes the ADS1115 driver for differential A0–A1 load-cell reads, faster sampling, and ±0.256 V PGA on the Cube Orange Plus bench path.
 

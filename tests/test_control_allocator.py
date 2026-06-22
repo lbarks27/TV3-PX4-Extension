@@ -154,6 +154,34 @@ class ControlAllocatorTests(unittest.TestCase):
         self.assertFalse(result.reachable)
         self.assertEqual(allocator.REASON_TORQUE_UNREACHABLE, result.reason)
 
+    def test_pgd_joint_solver_reaches_partial_thrust_with_small_torque_error(self) -> None:
+        """Projected GD should jointly satisfy a reduced net thrust (splay regime) + near zero torque."""
+        full = full_thrust_n(self.lander_engines)
+        desired_th = full * 0.82
+        res = allocator.allocate_projected_gradient(self.lander_engines, (0.0, 0.0, 0.0), desired_th)
+        # Either marked reachable or errors are small (within relaxed tol of the call)
+        self.assertLess(res.torque_error_nm, 1.0)
+        self.assertLess(res.thrust_error_n, 2.0)
+        self.assertGreater(res.achieved_thrust_n, desired_th - 3.0)
+
+    def test_pgd_respects_actuator_limits(self) -> None:
+        # Demand something that would push limits; check no command exceeds
+        res = allocator.allocate_projected_gradient(
+            self.lander_engines, (0.0, 12.0, 0.0), self.lander_hover_thrust_n
+        )
+        for cmd in res.commands:
+            roll, yaw = cmd
+            # limits from geometry are enforced by projection
+            self.assertGreaterEqual(roll, -90.1)
+            self.assertLessEqual(roll, 90.1)
+            self.assertGreaterEqual(yaw, -0.1)  # yaw min typically 0 for lander
+
+    def test_pgd_single_engine_uses_torque_only(self) -> None:
+        res = allocator.allocate_projected_gradient(
+            self.ascent_engines, (0.0, 0.4, 0.0), self.ascent_nominal_thrust_n
+        )
+        self.assertLess(res.torque_error_nm, 0.6)
+
 
 if __name__ == "__main__":
     unittest.main()

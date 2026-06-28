@@ -66,6 +66,8 @@
       "land_e_m",
       "land_d_m",
       "sim_groundtruth_fallback",
+      "boost_full_thrust",
+      "boost_attitude_only",
       "ascent_mode",
       "apogee_mode",
       "landing_mode",

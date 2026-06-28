@@ -40,13 +40,12 @@ Today the generator applies the profile's `guidance` block to generated PX4
 `scripts/run_sitl_sih.sh` starts `scripts/run_profile_commands.py` by default,
 which executes profile command timelines such as arm and launch over MAVLink.
 
-## Current Starter Profiles
+## Current Starter Profiles (lander precision focus)
 
-- `single_engine_ascent.json`: default `tv3_v1` ascent gate with guidance off.
-- `lander_ignition_sequence.json`: three-engine sequencing smoke scenario.
-- `lander_hover_window.json`: short local hover window for `tv3_lander_v1` (default SIH gate).
-- `lander_offset_hover_window.json`: hover window with positional offset for force/allocator review.
-- `lander_waypoint_track.json`: nominal waypoint and landing approach scenario.
-- `lander_waypoint_track_viz.json`: waypoint track variant tuned for Hawkeye/ULog visualization review.
-- `lander_impossible_guidance.json`: guidance envelope no-solution fixture for Monte Carlo gates.
-- `lander_abort_fault_path.json`: fault-injection and abort review case.
+- `lander_hover_window.json`: short local hover for `tv3_lander_v1`.
+- `lander_offset_hover_window.json`: lateral translate + hover.
+- `lander_waypoint_track.json`: launch + waypoints + landing.
+- `lander_precision_land.json`: tight 0.5 m acceptance + low descent rates for the real-vehicle goal (recommended).
+- `lander_ignition_sequence.json`, `lander_splay_throttle.json`, `lander_abort_fault_path.json`: supporting.
+
+Experimental / legacy profiles have been moved to `_archive/config/flight_profiles/`. `single_engine_ascent` and many boost variants are de-emphasized (lander focus).

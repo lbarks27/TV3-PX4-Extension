@@ -37,6 +37,8 @@ GUIDANCE_KEYS = {
     "land_e_m",
     "land_d_m",
     "sim_groundtruth_fallback",
+    "boost_full_thrust",
+    "boost_attitude_only",
     "tilt_gain",
     "tilt_max_deg",
     "ascent_mode",
@@ -84,20 +86,32 @@ LOGGER_TOPICS = [
     ("failsafe_flags", 100),
     ("actuator_armed", 100),
     ("vehicle_attitude", 20),
+    ("vehicle_attitude_groundtruth", 20),
+	("vehicle_attitude_euler", 20),
+	("vehicle_attitude_groundtruth_euler", 20),
+    ("vehicle_angular_velocity", 20),
+    ("vehicle_angular_velocity_groundtruth", 20),
     ("vehicle_local_position", 50),
     ("vehicle_local_position_groundtruth", 50),
+    ("vehicle_global_position", 50),
+    ("vehicle_global_position_groundtruth", 50),
     ("# Control allocation and commanded wrench", None),
     ("control_allocator_status", 50),
     ("actuator_motors", 50),
     ("actuator_servos", 50),
     ("internal_combustion_engine_control", 50),
-    ("vehicle_torque_setpoint", 50),
-    ("vehicle_thrust_setpoint", 50),
+    ("vehicle_torque_setpoint", 20),
+    ("vehicle_thrust_setpoint", 20),
     ("trajectory_setpoint", 50),
+    ("vehicle_command_ack", 50),
     ("# TV3 tv3-specific review topics", None),
     ("tv3_command", 0),
     ("tv3_engine_command", 20),
+    ("tv3_allocator_status", 20),
+    ("tv3_plant_wrench", 20),
+    ("tv3_control_authority", 20),
     ("tv3_engine_state", 20),
+    ("tv3_gimbal_command", 20),
     ("tv3_guidance_status", 20),
     ("tv3_load_cell", 50),
     ("tv3_mode_status", 20),
@@ -165,6 +179,31 @@ def apply_flight_profile(vehicle: dict, profile: dict, profile_path: Path) -> di
     merged_mission = dict(merged.get("mission_profile", {}))
     merged_mission.update(profile.get("mission_profile", {}))
     merged["mission_profile"] = merged_mission
+
+    profile_motor_selection = profile.get("motor_selection")
+    if isinstance(profile_motor_selection, dict):
+        merged_motor_selection = dict(merged.get("motor_selection", {}))
+        merged_motor_selection.update(profile_motor_selection)
+        merged["motor_selection"] = merged_motor_selection
+
+    profile_controller = profile.get("controller")
+    if isinstance(profile_controller, dict):
+        merged_controller = dict(merged.get("controller", {}))
+        for key, value in profile_controller.items():
+            if isinstance(value, dict) and isinstance(merged_controller.get(key), dict):
+                section = dict(merged_controller[key])
+                section.update(value)
+                merged_controller[key] = section
+            else:
+                merged_controller[key] = value
+        merged["controller"] = merged_controller
+
+    profile_simulation = profile.get("simulation")
+    if isinstance(profile_simulation, dict):
+        merged_simulation = dict(merged.get("simulation", {}))
+        merged_simulation.update(profile_simulation)
+        merged["simulation"] = merged_simulation
+
     merged["_active_flight_profile"] = {
         "name": profile["name"],
         "source": repo_display_path(profile_path),
@@ -278,6 +317,8 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     state_machine = vehicle["state_machine"]
     hardware = vehicle["hardware"]
     body = vehicle["vehicle"]
+    simulation = vehicle.get("simulation", {})
+    body_mass_kg = float(simulation.get("sih_body_mass_kg", body["body_mass_kg"]))
     allocator_thrust = allocator_thrust_fields(vehicle)
     motor = vehicle["motor_selection"]
     load_cell = hardware["load_cell"]
@@ -297,7 +338,7 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "CA_RK_REF_THR", allocator_thrust["ca_reference_thrust_n"], 9)
     append_param(lines, "CA_RK_MIN_THR", allocator_thrust["ca_minimum_thrust_n"], 9)
     append_param(lines, "CA_RK_FAL_THR", allocator_thrust["ca_fallback_thrust_n"], 9)
-    append_param(lines, "CA_RK_BODY_M", body["body_mass_kg"], 9)
+    append_param(lines, "CA_RK_BODY_M", body_mass_kg, 9)
     append_param(lines, "CA_RK_BODY_CMX", body["body_com_x_m"], 9)
     append_param(lines, "CA_RK_MOT_WET", body["motor_loaded_mass_kg"], 9)
     append_param(lines, "CA_RK_MOT_DRY", body["motor_dry_mass_kg"], 9)
@@ -356,7 +397,9 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_BURNOUT_MS", state_machine["burnout_dwell_ms"], 6)
     append_param(lines, "RK_RAIL_LEN_M", body["rail_length_m"], 9)
     append_param(lines, "RK_ABORT_GCS", state_machine.get("abort_on_gcs_loss", 0), 6)
-    append_param(lines, "RK_BODY_MASS_KG", body["body_mass_kg"], 9)
+    burn_scale = float(motor.get("sim_burn_time_scale", 1.0))
+    append_param(lines, "RK_SIM_BURN_SCL", burn_scale, 9)
+    append_param(lines, "RK_BODY_MASS_KG", body_mass_kg, 9)
     append_param(lines, "RK_BODY_COM_X_M", body["body_com_x_m"], 9)
     append_param(lines, "RK_MOTOR_COM_X_M", body["motor_com_x_m"], 9)
 
@@ -386,6 +429,11 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
         ixx = float(inertia.get("ixx", ixx))
         iyy = float(inertia.get("iyy", iyy))
         izz = float(inertia.get("izz", izz))
+    sih_inertia = simulation.get("sih_inertia_kg_m2")
+    if isinstance(sih_inertia, dict):
+        ixx = float(sih_inertia.get("ixx", ixx))
+        iyy = float(sih_inertia.get("iyy", iyy))
+        izz = float(sih_inertia.get("izz", izz))
     append_param(lines, "RK_IXX", ixx, 9)
     append_param(lines, "RK_IYY", iyy, 9)
     append_param(lines, "RK_IZZ", izz, 9)
@@ -404,6 +452,8 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_RATE_I", controller["rate_i"], 9)
     append_param(lines, "RK_RATE_D", controller["rate_d"], 9)
     append_param(lines, "RK_INT_LIM_BOOST", controller.get("integrator_limit_boost", 15.0), 9)
+    append_param(lines, "RK_SIH_RAIL_RAMP", simulation.get("rail_ramp_s", 0.05), 9)
+    append_param(lines, "RK_SIH_RATE_DAMP", simulation.get("rate_damp_nm", 0.0), 9)
     append_param(lines, "RK_LC_SRC", load_cell.get("source", 0), 6)
     append_param(lines, "RK_LC_CH", load_cell["adc_channel"], 6)
     append_param(lines, "RK_LC_NEG_CH", load_cell.get("negative_channel", 1), 6)
@@ -417,6 +467,8 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_LC_TO_MS", load_cell.get("timeout_ms", 100), 6)
     append_param(lines, "RK_LC_RATE_HZ", load_cell.get("publish_rate_hz", 10), 6)
     append_param(lines, "RK_GD_ENABLE", g("enable", 0), 6)
+    append_param(lines, "RK_GD_BOOST_FULL", g("boost_full_thrust", 0), 6)
+    append_param(lines, "RK_GD_BOOST_ATT", g("boost_attitude_only", 0), 6)
     append_param(lines, "RK_GD_TAKE_ALT", g("takeoff_alt_m", 35.0), 9)
     append_param(lines, "RK_GD_APEX_ALT", g("apex_alt_m", 120.0), 9)
     append_param(lines, "RK_GD_POS_P", g("pos_p", 0.15), 9)
@@ -458,6 +510,7 @@ def write_px4_params(vehicle: dict, path: Path) -> None:
     append_param(lines, "RK_GD_WP2_C_MS", g("wp2_cruise_m_s", 0.0), 9)
     append_param(lines, "RK_GD_WP3_C_MS", g("wp3_cruise_m_s", 0.0), 9)
     append_param(lines, "RK_ATT_TILT_GAIN", g("tilt_gain", 0.12), 9)
+    append_param(lines, "RK_ATT_VEL_P", controller.get("att_vel_p", 2.0), 9)
     append_param(lines, "RK_ATT_TILT_MAX", g("tilt_max_deg", 20.0), 9)
     append_param(lines, "RK_ATT_ROLL_DEG", g("roll_prog_deg", 0.0), 9)
     append_param(lines, "RK_ATT_ROLL_T0", g("roll_prog_start_s", 0.0), 9)
@@ -532,7 +585,9 @@ def logger_topics_text() -> str:
             lines.append("")
             lines.append(topic)
         else:
-            lines.append(f"{topic} {interval_ms}")
+            # Pin instance 0 so PX4 does not call add_topic_multi() (10 instances per
+            # topic), which exceeds the logger's MAX_TOPICS_NUM subscription budget.
+            lines.append(f"{topic} {interval_ms} 0")
 
     return "\n".join(lines).rstrip() + "\n"
 

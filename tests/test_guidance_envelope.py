@@ -122,6 +122,19 @@ class GuidanceEnvelopeTests(unittest.TestCase):
         self.assertFalse(result.solution_valid)
         self.assertEqual(envelope.GUIDANCE_CONTROL, result.guidance_unreachable_reason)
 
+    def test_thrust_below_splay_floor_rejects_control_envelope(self) -> None:
+        config = envelope.load_guidance_config(envelope.load_flight_profile(HOVER_PROFILE))
+        vehicle = envelope.load_manifest(LANDER)
+        motor_reference = envelope.motor_reference_for_state(vehicle, thrust_n=LANDER_HOVER_THRUST_N)
+        state = envelope.GuidanceVehicleState(
+            phase=envelope.PHASE_LAUNCH_ASCENT,
+            required_thrust_n=40.0,
+        )
+        result = envelope.evaluate_envelope(vehicle, config, motor_reference, state)
+        self.assertFalse(result.solution_valid)
+        self.assertEqual(envelope.GUIDANCE_CONTROL, result.guidance_unreachable_reason)
+        self.assertEqual(allocator.CONTROL_THRUST_ENVELOPE, result.control_unreachable_reason)
+
     def test_monte_carlo_reports_mixed_valid_and_invalid_samples(self) -> None:
         report = envelope.run_monte_carlo(
             LANDER,

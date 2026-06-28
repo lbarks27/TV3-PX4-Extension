@@ -12,16 +12,16 @@ This repo supports a PX4-first data path for detailed SITL, flight, and ground-t
 | Use case | Tool | Entry point |
 |----------|------|-------------|
 | Live SITL 3D pose | **Hawkeye** | `./scripts/run_hawkeye.sh` |
-| Interactive 3D spatial review (no timeline) | **PyVista** | `./scripts/view_vehicle_frame.sh`, `./scripts/plot_ulog_replay.sh`, `./scripts/plot_ulog_engines.sh` |
-| Timed log playback (scrubbable timeline) | **Rerun** | replay scripts with `--rerun` |
-| Static PNG export | **PyVista** | replay/vehicle scripts with `-o *.png` or `--save` |
+| Archived ULog review | **Foxglove** | open the `.ulg` from `logs/sim/...` |
+| Vehicle manifest overview | **PyVista** | `./scripts/view_vehicle_frame.sh` |
+| Static PNG export | **PyVista** | `./scripts/view_vehicle_frame.sh --save ...` |
 | Static 2D ULog timeseries review | **Matplotlib** | `./scripts/plot_ulog.sh` |
 
-Hawkeye is a live UDP viewer only (port `19410`). PyVista opens an interactive 3D window you can orbit and zoom — it shows a single snapshot in time (pick with `--time`), not a scrubber. Rerun is for full timed playback across the log. Use `-o file.png` when you need a headless snapshot for reports or CI.
+Hawkeye is a live UDP viewer only (port `19410`). Foxglove is now the default way to inspect archived ULogs. PyVista opens a separate vehicle-manifest viewer you can orbit and zoom; use `--save` when you need a headless snapshot for reports or CI.
 
 ## Install And Validate
 
-Run once before any plotting or replay:
+Run once before any plotting or log review:
 
 ```bash
 ./scripts/setup_viz_env.sh
@@ -29,7 +29,7 @@ Run once before any plotting or replay:
 
 This creates or updates `../.work/tv3-viz-venv`, which avoids installing packages into Homebrew's externally managed Python.
 
-**Always use the repo shell wrappers** (`./scripts/plot_ulog.sh`, `./scripts/plot_ulog_replay.sh`, etc.). They activate the viz venv and prepend its `bin/` directory to `PATH` so the Rerun viewer executable is found. Calling `python3 tools/...` directly will fail with missing `pyvista` / `rerun-sdk` unless you manage the venv yourself.
+**Always use the repo shell wrappers** (`./scripts/plot_ulog.sh`, `./scripts/view_vehicle_frame.sh`, etc.). They activate the viz venv for the local Python dependencies. Calling `python3 tools/...` directly can fail if the visualization packages are not installed in your active environment.
 
 Headless smoke test (no GUI windows):
 
@@ -55,11 +55,21 @@ PX4 reads `etc/logging/logger_topics.txt` from its storage directory at boot. Th
 That profile includes core PX4 state and control-allocation topics plus TV3-specific topics such as:
 
 ```text
+vehicle_attitude_groundtruth
+vehicle_attitude_euler
+vehicle_attitude_groundtruth_euler
+vehicle_angular_velocity
+vehicle_angular_velocity_groundtruth
+vehicle_global_position
+vehicle_global_position_groundtruth
+vehicle_command_ack
 tv3_status
 tv3_thrust
 tv3_motor_reference
 tv3_engine_command
+tv3_allocator_status
 tv3_engine_state
+tv3_gimbal_command
 tv3_guidance_status
 vehicle_local_position_groundtruth
 vehicle_torque_setpoint
@@ -67,6 +77,8 @@ vehicle_thrust_setpoint
 actuator_servos
 actuator_motors
 ```
+
+The engine and gimbal command topics also carry per-slot `selected_motor_index[4]` metadata so array element `i` can be tied back to a specific motor catalog entry in Foxglove or post-run analysis.
 
 If you need to sync the profile manually before a run:
 
@@ -119,9 +131,9 @@ Install Hawkeye on macOS with:
 brew tap px4/px4 && brew install px4/px4/hawkeye
 ```
 
-## Interactive 3D Review (PyVista)
+## Vehicle Manifest Overview (PyVista)
 
-These open a PyVista window. Orbit with the mouse; there is no timeline scrubber. Use `--time` to choose which log instant to display (default: last frame).
+This opens a PyVista window. Orbit with the mouse. Use `--overview` for the four-panel summary or `--interactive` for the single-view slider window.
 
 Vehicle frame with per-engine roll/yaw sliders:
 
@@ -135,65 +147,17 @@ Four-panel overview (interactive):
 ./scripts/view_vehicle_frame.sh --overview
 ```
 
-Flight path plus vehicle attitude at one instant:
-
-```bash
-./scripts/plot_ulog_replay.sh --latest
-./scripts/plot_ulog_replay.sh --latest --time 12.5 --camera track
-```
-
-Engine mounts and thrust vectors at one instant:
-
-```bash
-./scripts/plot_ulog_engines.sh --latest
-./scripts/plot_ulog_engines.sh --latest --time 8.0
-```
-
 Export PNG snapshots (headless, no window):
 
 ```bash
 ./scripts/view_vehicle_frame.sh --save build/vehicle_frame/tv3_lander_v1.png
-./scripts/plot_ulog_replay.sh --latest -o /tmp/trajectory.png --time 12.5
-./scripts/plot_ulog_engines.sh --latest -o /tmp/engines.png --time 12.5
 ```
 
-Camera presets for PyVista: `iso`, `top`, `side`, `front`, `forward_up`, `overview`, `track`.
+Camera presets for PyVista: `iso`, `top`, `side`, `front`.
 
-## Timed Log Playback (Rerun)
+## Archived ULog Review (Foxglove)
 
-Use Rerun when you want to scrub through time. Guidance metrics are Rerun-only (no PyVista 3D scene).
-
-```bash
-./scripts/plot_ulog_replay.sh --latest --rerun
-./scripts/plot_ulog_replay.sh --latest --scene guidance
-./scripts/plot_ulog_engines.sh --latest --rerun
-```
-
-Save a recording for offline review (headless, no viewer window):
-
-```bash
-./scripts/plot_ulog_replay.sh --latest --rerun -o /tmp/tv3_trajectory.rrd
-./scripts/plot_ulog_replay.sh --latest --scene guidance -o /tmp/tv3_guidance.rrd
-./scripts/plot_ulog_engines.sh --latest --rerun -o /tmp/tv3_engines.rrd
-```
-
-Re-open a saved recording:
-
-```bash
-rerun /tmp/tv3_trajectory.rrd
-```
-
-Or invoke the venv binary directly:
-
-```bash
-../.work/tv3-viz-venv/bin/rerun /tmp/tv3_trajectory.rrd
-```
-
-Pass an explicit log path instead of `--latest`:
-
-```bash
-./scripts/plot_ulog_replay.sh logs/sim/YYYY-MM-DD/<run-id>/HH_MM_SS.ulg
-```
+Open the archived `.ulg` files under `logs/sim/YYYY-MM-DD/<run-id>/` directly in Foxglove to inspect the timeline, topics, and plots.
 
 ## 2D Timeseries Review (Matplotlib)
 
@@ -228,11 +192,8 @@ If a panel says a topic is missing, the log was probably recorded before the TV3
 
 | Symptom | Fix |
 |---------|-----|
-| `missing dependency: install pyvista` / `rerun-sdk` | Run `./scripts/setup_viz_env.sh`, then use `./scripts/...` wrappers |
-| `Rerun viewer not found on PATH` | Use repo scripts (they prepend `../.work/tv3-viz-venv/bin` to `PATH`) |
-| `gRPC has been unable to connect` with `--rerun` | Same as above — viewer binary was not found |
-| PyVista window does not appear | You passed `-o *.png` (headless export) — omit `-o` for interactive |
-| Guidance PNG rejected | Expected — guidance is Rerun-only; use `--rerun` or `-o file.rrd` |
+| `missing dependency: install pyvista` / `matplotlib` | Run `./scripts/setup_viz_env.sh`, then use `./scripts/...` wrappers |
+| PyVista window does not appear | You passed `--save` (headless export) — omit it for interactive |
 | `ULog not found` with `--latest` | Run SITL first so logs land under `logs/sim/`, or pass an explicit `.ulg` path |
 
 ## SIH Ground-Truth Topics

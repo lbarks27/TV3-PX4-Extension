@@ -59,6 +59,14 @@ class ControlAllocatorTests(unittest.TestCase):
         self.assertAlmostEqual(40.0, achieved, delta=0.6)
         self.assertGreater(yaw, 0.0)
 
+    def test_zero_thrust_commands_full_collective_splay(self) -> None:
+        yaw = allocator.collective_throttle_yaw_deg(0.0, self.lander_engines)
+        achieved = sum(
+            allocator.plant_axial_thrust(engine, 0.0, yaw) for engine in self.lander_engines
+        )
+        self.assertAlmostEqual(90.0, yaw, delta=0.5)
+        self.assertAlmostEqual(0.0, achieved, delta=0.6)
+
     def test_high_thrust_above_full_envelope_is_unreachable(self) -> None:
         result = allocator.allocate(
             self.lander_engines,

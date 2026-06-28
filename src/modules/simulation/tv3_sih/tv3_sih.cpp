@@ -19,8 +19,12 @@
 #include <uORB/topics/tv3_engine_command.h>
 #include <uORB/topics/tv3_engine_state.h>
 #include <uORB/topics/tv3_gimbal_command.h>
+#include <uORB/topics/tv3_plant_wrench.h>
+#include <uORB/topics/tv3_status.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_euler.h>
+#include <uORB/topics/vehicle_attitude_groundtruth_euler.h>
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_local_position.h>
 #include <math.h>
@@ -93,6 +97,18 @@ static Vector3f normalize_or_default(const Vector3f &v, const Vector3f &def)
 		return v / n;
 	}
 	return def;
+}
+
+// PX4's sensor voter flags STALE after ~100 identical samples. Rail hold and ground
+// rest produce constant IMU readings at 400 Hz; add sub-noise dither so SIH stays valid.
+static void apply_imu_dither(float &x, float &y, float &z, hrt_abstime now, uint8_t salt)
+{
+	constexpr float kAmp = 2.5e-4f;
+	const float t = static_cast<float>((now / 2500U) + salt * 17U);
+	const float w = 0.37f + 0.11f * static_cast<float>(salt & 3U);
+	x += kAmp * sinf(t * w);
+	y += kAmp * sinf(t * w + 2.1f);
+	z += kAmp * sinf(t * w + 4.2f);
 }
 }
 
@@ -207,6 +223,7 @@ private:
 
 		_engine_state_sub.update(&_engine_state);
 		_engine_command_sub.update(&_engine_command);
+		_tv3_status_sub.update(&_tv3_status);
 
 		const hrt_abstime now = hrt_absolute_time();
 		// dt from hrt (manipulated by SIH clock in run()). Clamped for safety. Integration uses this dt.
@@ -269,6 +286,7 @@ private:
 		_inertia_inv  = Vector3f{1.f / math::max(ixx, 1e-6f),
 					 1.f / math::max(iyy, 1e-6f),
 					 1.f / math::max(izz, 1e-6f)};
+
 	}
 
 	float vehicle_mass_kg() const
@@ -382,11 +400,30 @@ private:
 		const Vector3f g_world{0.f, 0.f, kGravityMps2};
 		Vector3f a_world = f_world / math::max(mass, 0.1f) + g_world;
 
-		// Rail constraint (kinematic lock). While altitude < rail_len, force zero lateral motion/vel/pos
-		// and zero body rates. Additionally, we freeze attitude integration to model a stiff rail
-		// that holds orientation until clear (prevents disturbance torques from accumulating pitch
-		// while "on rail"). No friction or compliance modeled. Matches tv3_status.rail_exit semantics.
-		const bool on_rail = (_rail_length_m > 0.f) && (-_position(2) < _rail_length_m);
+		// Rail constraint (kinematic lock). During boost/ignition use tv3_status.rail_exit so the
+		// plant and mode manager agree on release timing (integrated rail distance, not altitude).
+		// Pre-boost, fall back to altitude below rail length for pad hold.
+		const bool powered_boost = _tv3_status.mode == tv3_status_s::MODE_BOOST
+					   || _tv3_status.mode == tv3_status_s::MODE_IGNITION_PENDING;
+		bool on_rail = false;
+
+		if (_rail_length_m > 0.f) {
+			if (powered_boost) {
+				on_rail = !_tv3_status.rail_exit;
+			} else {
+				on_rail = -_position(2) < _rail_length_m;
+			}
+		}
+
+		if (_prev_on_rail && !on_rail) {
+			_omega_b.zero();
+			_angular_velocity.zero();
+			_rail_torque_scale = 0.f;
+			_rail_release_us = hrt_absolute_time();
+		}
+
+		_prev_on_rail = on_rail;
+
 		bool skip_attitude_integration = false;
 		if (on_rail) {
 			a_world(0) = 0.f;
@@ -433,6 +470,27 @@ private:
 			tau_net -= _omega_b * rate_damp_nm;
 		}
 
+		// Rail is kinematic: it holds attitude and absorbs disturbance torques from thrust
+		// imbalance. Without this, the first free-flight step applies the full instantaneous
+		// torque while omega is still zero, producing an impulsive spin (BS-021).
+		float rail_torque_scale = 1.f;
+
+		if (on_rail) {
+			rail_torque_scale = 0.f;
+		} else if (_rail_release_us > 0) {
+			const float ramp_s = get_param_float("RK_SIH_RAIL_RAMP", 0.05f);
+
+			if (ramp_s > 1e-6f) {
+				const float elapsed_s = (hrt_absolute_time() - _rail_release_us) * 1e-6f;
+				rail_torque_scale = math::constrain(elapsed_s / ramp_s, 0.f, 1.f);
+			}
+		}
+
+		tau_net *= rail_torque_scale;
+		_rail_torque_scale = rail_torque_scale;
+
+		publish_plant_wrench(on_rail, rail_torque_scale, force_b, tau_b, tau_net);
+
 		const Vector3f alpha_b{_inertia_inv(0) * tau_net(0),
 				       _inertia_inv(1) * tau_net(1),
 				       _inertia_inv(2) * tau_net(2)};
@@ -474,14 +532,39 @@ private:
 		_attitude_pub.publish(attitude);
 		_attitude_groundtruth_pub.publish(attitude);
 
+		vehicle_attitude_euler_s attitude_euler{};
+		attitude_euler.timestamp = now;
+		attitude_euler.timestamp_sample = now;
+		attitude_euler.roll_rad = _euler(0);
+		attitude_euler.pitch_rad = _euler(1);
+		attitude_euler.yaw_rad = _euler(2);
+		_attitude_euler_pub.publish(attitude_euler);
+
+		vehicle_attitude_groundtruth_euler_s attitude_groundtruth_euler{};
+		attitude_groundtruth_euler.timestamp = now;
+		attitude_groundtruth_euler.timestamp_sample = now;
+		attitude_groundtruth_euler.roll_rad = _euler(0);
+		attitude_groundtruth_euler.pitch_rad = _euler(1);
+		attitude_groundtruth_euler.yaw_rad = _euler(2);
+		_attitude_groundtruth_euler_pub.publish(attitude_groundtruth_euler);
+
 		vehicle_angular_velocity_s angular_velocity{};
 		angular_velocity.timestamp = now;
 		angular_velocity.timestamp_sample = now;
 		_angular_velocity.copyTo(angular_velocity.xyz);
 		_angular_velocity_groundtruth_pub.publish(angular_velocity);
 		_angular_velocity_pub.publish(angular_velocity);
-		_px4_accel.update(now, _specific_force(0), _specific_force(1), _specific_force(2));
-		_px4_gyro.update(now, _angular_velocity(0), _angular_velocity(1), _angular_velocity(2));
+
+		float accel_x = _specific_force(0);
+		float accel_y = _specific_force(1);
+		float accel_z = _specific_force(2);
+		float gyro_x = _angular_velocity(0);
+		float gyro_y = _angular_velocity(1);
+		float gyro_z = _angular_velocity(2);
+		apply_imu_dither(accel_x, accel_y, accel_z, now, 1);
+		apply_imu_dither(gyro_x, gyro_y, gyro_z, now, 2);
+		_px4_accel.update(now, accel_x, accel_y, accel_z);
+		_px4_gyro.update(now, gyro_x, gyro_y, gyro_z);
 
 		vehicle_local_position_s local{};
 		local.timestamp = now;
@@ -545,6 +628,9 @@ private:
 	float _body_mass_kg{1.f};
 	float _body_com_x_m{0.f};
 	float _rail_length_m{0.f};
+	bool _prev_on_rail{false};
+	hrt_abstime _rail_release_us{0};
+	float _rail_torque_scale{1.f};
 	float _home_lat_deg{47.397742f};
 	float _home_lon_deg{8.545594f};
 	float _home_alt_m{488.f};
@@ -642,6 +728,25 @@ private:
 		return engine_thrust_dir_body_angles(i, p, y);
 	}
 
+	void publish_plant_wrench(bool on_rail, float rail_torque_scale, const Vector3f &force_b,
+				  const Vector3f &engine_torque_b, const Vector3f &net_torque_b)
+	{
+		tv3_plant_wrench_s wrench{};
+		wrench.timestamp = hrt_absolute_time();
+		wrench.on_rail = on_rail;
+		wrench.rail_torque_scale = rail_torque_scale;
+		wrench.body_force_n[0] = force_b(0);
+		wrench.body_force_n[1] = force_b(1);
+		wrench.body_force_n[2] = force_b(2);
+		wrench.engine_torque_nm[0] = engine_torque_b(0);
+		wrench.engine_torque_nm[1] = engine_torque_b(1);
+		wrench.engine_torque_nm[2] = engine_torque_b(2);
+		wrench.net_torque_nm[0] = net_torque_b(0);
+		wrench.net_torque_nm[1] = net_torque_b(1);
+		wrench.net_torque_nm[2] = net_torque_b(2);
+		_plant_wrench_pub.publish(wrench);
+	}
+
 	void publish_gimbal_command()
 	{
 		tv3_gimbal_command_s gimbal{};
@@ -651,6 +756,7 @@ private:
 		for (int i = 0; i < _num_groups && i < tv3_gimbal_command_s::MAX_ENGINES; ++i) {
 			const float pitch_rad = (_applied_pitch_rad[i] != 0.f ? _applied_pitch_rad[i] : _cmd_pitch_rad[i]);
 			const float yaw_rad = (_applied_yaw_rad[i] != 0.f ? _applied_yaw_rad[i] : _cmd_yaw_rad[i]);
+			gimbal.selected_motor_index[i] = _engine_state.selected_motor_index[i];
 			gimbal.commanded_pitch_deg[i] = pitch_rad / kDegToRad;
 			gimbal.commanded_yaw_deg[i] = yaw_rad / kDegToRad;
 		}
@@ -664,8 +770,12 @@ private:
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _engine_state_sub{ORB_ID(tv3_engine_state)};
 	uORB::Subscription _engine_command_sub{ORB_ID(tv3_engine_command)};
+	uORB::Subscription _tv3_status_sub{ORB_ID(tv3_status)};
+	tv3_status_s _tv3_status{};
 	uORB::Publication<vehicle_attitude_s> _attitude_pub{ORB_ID(vehicle_attitude)};
 	uORB::Publication<vehicle_attitude_s> _attitude_groundtruth_pub{ORB_ID(vehicle_attitude_groundtruth)};
+	uORB::Publication<vehicle_attitude_euler_s> _attitude_euler_pub{ORB_ID(vehicle_attitude_euler)};
+	uORB::Publication<vehicle_attitude_groundtruth_euler_s> _attitude_groundtruth_euler_pub{ORB_ID(vehicle_attitude_groundtruth_euler)};
 	uORB::Publication<vehicle_angular_velocity_s> _angular_velocity_pub{ORB_ID(vehicle_angular_velocity)};
 	uORB::Publication<vehicle_angular_velocity_s> _angular_velocity_groundtruth_pub{ORB_ID(vehicle_angular_velocity_groundtruth)};
 	uORB::Publication<vehicle_local_position_s> _local_position_pub{ORB_ID(vehicle_local_position)};
@@ -674,6 +784,7 @@ private:
 	uORB::Publication<vehicle_global_position_s> _global_position_groundtruth_pub{ORB_ID(vehicle_global_position_groundtruth)};
 	uORB::Publication<manual_control_setpoint_s> _manual_control_pub{ORB_ID(manual_control_setpoint)};
 	uORB::Publication<tv3_gimbal_command_s> _gimbal_command_pub{ORB_ID(tv3_gimbal_command)};
+	uORB::Publication<tv3_plant_wrench_s> _plant_wrench_pub{ORB_ID(tv3_plant_wrench)};
 };
 
 extern "C" __EXPORT int tv3_sih_main(int argc, char *argv[])

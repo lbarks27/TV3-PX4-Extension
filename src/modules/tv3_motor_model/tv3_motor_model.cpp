@@ -182,6 +182,7 @@ public:
 				_param_engine_motor_index[i] = param_find(name);
 			}
 			_param_body_mass_kg = param_find("RK_BODY_MASS_KG");
+			_param_sim_burn_scale = param_find("RK_SIM_BURN_SCL");
 			_param_parameter_update = ORB_ID(parameter_update);
 			update_parameters();
 		}
@@ -324,9 +325,15 @@ private:
 
 			if (_param_body_mass_kg != PARAM_INVALID) {
 				param_get(_param_body_mass_kg, &_body_mass_kg);
-			_body_mass_kg = math::max(_body_mass_kg, 0.f);
+				_body_mass_kg = math::max(_body_mass_kg, 0.f);
+			}
+
+			if (_param_sim_burn_scale != PARAM_INVALID) {
+				param_get(_param_sim_burn_scale, &_sim_burn_time_scale);
+			}
+
+			_sim_burn_time_scale = math::constrain(_sim_burn_time_scale, 0.1f, 100.f);
 		}
-	}
 
 	bool load_catalog(std::vector<CatalogEntry> &entries)
 	{
@@ -605,7 +612,14 @@ private:
 
 					if (slot.burn_active && slot.burn_start != 0) {
 						burn_time_s = static_cast<float>(hrt_absolute_time() - slot.burn_start) * 1e-6f;
-						sample_curve(slot, burn_time_s, thrust_n, motor_mass_kg, burn_fraction, impulse_ns);
+						float curve_time_s = burn_time_s;
+
+						// Stretch propellant depletion for SIH hover gates without slowing ignition ramp-up.
+						if (_status.mode == tv3_status_s::MODE_BOOST && _sim_burn_time_scale > 1.01f) {
+							curve_time_s = burn_time_s / _sim_burn_time_scale;
+						}
+
+						sample_curve(slot, curve_time_s, thrust_n, motor_mass_kg, burn_fraction, impulse_ns);
 						active_mask |= static_cast<uint8_t>(1u << i);
 					}
 
@@ -654,6 +668,8 @@ private:
 		param_t _param_engine_count{PARAM_INVALID};
 		param_t _param_engine_motor_index[kMaxEngines]{PARAM_INVALID, PARAM_INVALID, PARAM_INVALID, PARAM_INVALID};
 		param_t _param_body_mass_kg{PARAM_INVALID};
+		param_t _param_sim_burn_scale{PARAM_INVALID};
+		float _sim_burn_time_scale{1.f};
 		orb_id_t _param_parameter_update{};
 
 		uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};

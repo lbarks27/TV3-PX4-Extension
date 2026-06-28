@@ -311,6 +311,14 @@ def thrust_envelope(engines: Sequence[EngineGeometry]) -> tuple[float, float]:
     return full_thrust, min_splayed
 
 
+def practical_thrust_floor(engines: Sequence[EngineGeometry]) -> float:
+    """Minimum practical collective thrust using each engine's splay limit."""
+    if not engines:
+        return 0.0
+    splay_max_deg = min(engine.splay_max_deg for engine in engines)
+    return sum(plant_axial_thrust(engine, 0.0, splay_max_deg) for engine in engines)
+
+
 def flight_effectiveness_torque(
     engine: EngineGeometry,
     *,
@@ -410,16 +418,19 @@ def collective_throttle_yaw_deg(
     throttle_max_deg: float | None = None,
 ) -> float:
     """Solve identical secondary-axis yaw (splay) for collective throttle."""
-    if not engines or desired_net_thrust_n <= 0.0:
-        return 0.0
-
-    full_thrust = sum(plant_axial_thrust(engine, roll_deg, 0.0) for engine in engines)
-    if full_thrust < 1e-3 or desired_net_thrust_n >= full_thrust - 1e-3:
+    if not engines:
         return 0.0
 
     yaw_limit = throttle_max_deg
     if yaw_limit is None:
         yaw_limit = min(engine.yaw_max_deg for engine in engines)
+
+    if desired_net_thrust_n <= 0.0:
+        return min(90.0, yaw_limit)
+
+    full_thrust = sum(plant_axial_thrust(engine, roll_deg, 0.0) for engine in engines)
+    if full_thrust < 1e-3 or desired_net_thrust_n >= full_thrust - 1e-3:
+        return 0.0
 
     low = 0.0
     high = yaw_limit
@@ -440,12 +451,804 @@ def collective_splay_deg(
     splay_max_deg: float,
 ) -> float:
     """Backward-compatible alias: splay is secondary-axis collective yaw."""
-    if total_chamber_thrust_n < 1e-3 or desired_net_thrust_n <= 0.0:
+    if total_chamber_thrust_n < 1e-3:
         return 0.0
+
+    if desired_net_thrust_n <= 0.0:
+        return min(90.0, splay_max_deg)
     if desired_net_thrust_n >= total_chamber_thrust_n - 1e-3:
         return 0.0
     ratio = max(0.0, min(1.0, desired_net_thrust_n / total_chamber_thrust_n))
     return max(0.0, min(splay_max_deg, math.degrees(math.acos(ratio))))
+
+
+@dataclass(frozen=True)
+class LmConfig:
+    max_iter: int = 12
+    torque_tol_nm: float = 0.15
+    lambda0: float = 0.01
+    thrust_weight: float = 1.0
+    splay_weight: float = 0.1
+    fd_eps: float = 0.01
+
+
+@dataclass
+class LmSolveResult:
+    commands: tuple[tuple[float, float], ...] = ()
+    residual_torque_nm: float = math.inf
+    residual_thrust_n: float = math.inf
+    cost: float = math.inf
+    lambda_final: float = 0.0
+    iterations_used: int = 0
+    converged: bool = False
+    demand_saturated: bool = False
+
+
+def clamp_torque_demand(
+    desired_torque_nm: Sequence[float],
+    torque_limits: TorqueLimits | None = None,
+) -> tuple[tuple[float, float, float], bool]:
+    limits = torque_limits or TorqueLimits()
+    clamped = (
+        constrain(desired_torque_nm[0], -limits.roll_nm, limits.roll_nm),
+        constrain(desired_torque_nm[1], -limits.pitch_nm, limits.pitch_nm),
+        constrain(desired_torque_nm[2], -limits.yaw_nm, limits.yaw_nm),
+    )
+    saturated = any(
+        abs(clamped[index] - desired_torque_nm[index]) > 1e-6 for index in range(3)
+    )
+    return clamped, saturated
+
+
+def wrench_demand_feasible(
+    engines: Sequence[EngineGeometry],
+    desired_torque_nm: Sequence[float],
+    desired_thrust_n: float,
+    *,
+    torque_limits: TorqueLimits | None = None,
+) -> bool:
+    if not engines:
+        return False
+    full_thrust, min_splayed = thrust_envelope(engines)
+    min_thrust = max(min_splayed, practical_thrust_floor(engines))
+    if desired_thrust_n > full_thrust + 1e-3 or desired_thrust_n < min_thrust - 1e-3:
+        return False
+    limits = torque_limits or TorqueLimits()
+    roll, pitch, yaw = desired_torque_nm
+    return (
+        abs(roll) <= limits.roll_nm + 1e-6
+        and abs(pitch) <= limits.pitch_nm + 1e-6
+        and abs(yaw) <= limits.yaw_nm + 1e-6
+    )
+
+
+def plant_total_wrench(
+    engines: Sequence[EngineGeometry],
+    commands: Sequence[tuple[float, float]],
+    *,
+    active_mask: int | None = None,
+) -> tuple[tuple[float, float, float], float]:
+    torque = (0.0, 0.0, 0.0)
+    thrust = 0.0
+    for index, engine in enumerate(engines):
+        if active_mask is not None and (active_mask & (1 << index)) == 0:
+            continue
+        roll, yaw = commands[index]
+        torque = add(torque, plant_torque(engine, roll, yaw))
+        thrust += plant_axial_thrust(engine, roll, yaw)
+    return torque, thrust
+
+
+def _mean_active_yaw(commands: Sequence[tuple[float, float]], active_indices: Sequence[int]) -> float:
+    if not active_indices:
+        return 0.0
+    return sum(commands[index][1] for index in active_indices) / len(active_indices)
+
+
+def _clip_commands(
+    engines: Sequence[EngineGeometry],
+    commands: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    clipped: list[tuple[float, float]] = []
+    for engine, (roll, yaw) in zip(engines, commands):
+        clipped.append(
+            (
+                constrain(roll, engine.roll_min_deg, engine.roll_max_deg),
+                constrain(yaw, engine.yaw_min_deg, engine.yaw_max_deg),
+            )
+        )
+    return clipped
+
+
+def _evaluate_lm_residual(
+    engines: Sequence[EngineGeometry],
+    commands: Sequence[tuple[float, float]],
+    desired_torque_nm: Sequence[float],
+    desired_thrust_n: float,
+    active_indices: Sequence[int],
+    config: LmConfig,
+) -> tuple[list[float], float, float, float]:
+    torque, thrust = plant_total_wrench(engines, commands, active_mask=None)
+    torque_error = sub(torque, desired_torque_nm)
+    thrust_error = desired_thrust_n - thrust
+    mean_yaw = _mean_active_yaw(commands, active_indices)
+    thrust_scale = max(abs(desired_thrust_n), 1.0)
+    residual = [
+        torque_error[0],
+        torque_error[1],
+        torque_error[2],
+        config.thrust_weight * thrust_error / thrust_scale,
+    ]
+    for index in active_indices:
+        residual.append(config.splay_weight * (commands[index][1] - mean_yaw))
+    cost = 0.5 * sum(value * value for value in residual)
+    return residual, cost, norm(torque_error), thrust_error
+
+
+def _solve_linear_system(matrix_a: list[list[float]], vector_b: list[float]) -> list[float] | None:
+    size = len(vector_b)
+    a = [row[:] for row in matrix_a]
+    b = vector_b[:]
+
+    for col in range(size):
+        pivot = col
+        pivot_abs = abs(a[col][col])
+        for row in range(col + 1, size):
+            candidate = abs(a[row][col])
+            if candidate > pivot_abs:
+                pivot_abs = candidate
+                pivot = row
+        if pivot_abs < 1e-9:
+            return None
+        if pivot != col:
+            a[col], a[pivot] = a[pivot], a[col]
+            b[col], b[pivot] = b[pivot], b[col]
+        inv_pivot = 1.0 / a[col][col]
+        for row in range(col + 1, size):
+            factor = a[row][col] * inv_pivot
+            for k in range(col, size):
+                a[row][k] -= factor * a[col][k]
+            b[row] -= factor * b[col]
+
+    for row in range(size - 1, -1, -1):
+        total = b[row]
+        for col in range(row + 1, size):
+            total -= a[row][col] * b[col]
+        if abs(a[row][row]) < 1e-9:
+            return None
+        b[row] = total / a[row][row]
+    return b
+
+
+def _lm_converged(
+    torque_error_nm: float,
+    thrust_error_n: float,
+    desired_thrust_n: float,
+    config: LmConfig,
+) -> bool:
+    if torque_error_nm >= config.torque_tol_nm:
+        return False
+    if config.thrust_weight <= 0.0:
+        return True
+    thrust_tol = max(1.0, abs(desired_thrust_n) * 0.05)
+    return abs(thrust_error_n) < thrust_tol
+
+
+def solve_gimbal_lm(
+    engines: Sequence[EngineGeometry],
+    desired_torque_nm: Sequence[float],
+    desired_thrust_n: float,
+    initial_commands: Sequence[tuple[float, float]],
+    *,
+    active_mask: int | None = None,
+    config: LmConfig | None = None,
+    torque_limits: TorqueLimits | None = None,
+) -> LmSolveResult:
+    """Bounded Levenberg-Marquardt solver for torque, net thrust, and symmetric splay."""
+    cfg = config or LmConfig()
+    result = LmSolveResult()
+    clamped_torque, torque_saturated = clamp_torque_demand(desired_torque_nm, torque_limits)
+    result.demand_saturated = torque_saturated
+    desired_torque_nm = clamped_torque
+
+    if not engines:
+        result.commands = tuple(initial_commands)
+        return result
+
+    if not wrench_demand_feasible(engines, clamped_torque, desired_thrust_n, torque_limits=torque_limits):
+        result.demand_saturated = True
+        result.commands = tuple(_clip_commands(engines, list(initial_commands)))
+        torque, thrust = plant_total_wrench(engines, result.commands)
+        result.residual_torque_nm = norm(sub(torque, clamped_torque))
+        result.residual_thrust_n = desired_thrust_n - thrust
+        result.converged = False
+        return result
+
+    active_indices = [
+        index
+        for index, engine in enumerate(engines)
+        if (active_mask is None or (active_mask & (1 << index)) != 0) and engine.thrust_n > 0.5
+    ]
+    if not active_indices:
+        result.commands = tuple(initial_commands)
+        return result
+
+    commands = _clip_commands(engines, list(initial_commands))
+    dof_count = len(engines) * 2
+    state = [0.0] * dof_count
+    for index, (roll, yaw) in enumerate(commands):
+        state[2 * index] = math.radians(roll)
+        state[2 * index + 1] = math.radians(yaw)
+
+    def state_to_commands(values: Sequence[float]) -> list[tuple[float, float]]:
+        converted = []
+        for index in range(len(engines)):
+            converted.append(
+                (
+                    math.degrees(values[2 * index]),
+                    math.degrees(values[2 * index + 1]),
+                )
+            )
+        return _clip_commands(engines, converted)
+
+    def dof_active(dof: int) -> bool:
+        engine = dof // 2
+        return engine in active_indices
+
+    residual, cost, torque_error_nm, thrust_error_n = _evaluate_lm_residual(
+        engines,
+        commands,
+        desired_torque_nm,
+        desired_thrust_n,
+        active_indices,
+        cfg,
+    )
+    result.cost = cost
+    result.residual_torque_nm = torque_error_nm
+    result.residual_thrust_n = thrust_error_n
+
+    if _lm_converged(torque_error_nm, thrust_error_n, desired_thrust_n, cfg):
+        result.commands = tuple(commands)
+        result.converged = True
+        return result
+
+    lambda_value = max(cfg.lambda0, 1e-6)
+
+    for iteration in range(max(cfg.max_iter, 1)):
+        result.iterations_used = iteration + 1
+        trial_commands = state_to_commands(state)
+        base_residual, _, _, _ = _evaluate_lm_residual(
+            engines,
+            trial_commands,
+            desired_torque_nm,
+            desired_thrust_n,
+            active_indices,
+            cfg,
+        )
+        jacobian: list[list[float]] = [[0.0] * dof_count for _ in range(len(base_residual))]
+
+        for dof in range(dof_count):
+            if not dof_active(dof):
+                continue
+            plus_state = state[:]
+            minus_state = state[:]
+            plus_state[dof] += cfg.fd_eps
+            minus_state[dof] -= cfg.fd_eps
+            plus_residual, _, _, _ = _evaluate_lm_residual(
+                engines,
+                state_to_commands(plus_state),
+                desired_torque_nm,
+                desired_thrust_n,
+                active_indices,
+                cfg,
+            )
+            minus_residual, _, _, _ = _evaluate_lm_residual(
+                engines,
+                state_to_commands(minus_state),
+                desired_torque_nm,
+                desired_thrust_n,
+                active_indices,
+                cfg,
+            )
+            inv_2eps = 1.0 / (2.0 * cfg.fd_eps)
+            for row in range(len(base_residual)):
+                jacobian[row][dof] = (plus_residual[row] - minus_residual[row]) * inv_2eps
+
+        normal = [[0.0] * dof_count for _ in range(dof_count)]
+        gradient = [0.0] * dof_count
+        for dof in range(dof_count):
+            for other in range(dof_count):
+                normal[dof][other] = sum(jacobian[row][dof] * jacobian[row][other] for row in range(len(base_residual)))
+            normal[dof][dof] += lambda_value
+            gradient[dof] = -sum(jacobian[row][dof] * base_residual[row] for row in range(len(base_residual)))
+
+        delta = _solve_linear_system(normal, gradient)
+        if delta is None:
+            lambda_value = min(lambda_value * 10.0, 1e6)
+            continue
+
+        trial_state = [state[dof] + delta[dof] for dof in range(dof_count)]
+        trial_commands = state_to_commands(trial_state)
+        trial_residual, trial_cost, trial_torque_error, trial_thrust_error = _evaluate_lm_residual(
+            engines,
+            trial_commands,
+            desired_torque_nm,
+            desired_thrust_n,
+            active_indices,
+            cfg,
+        )
+
+        if trial_cost < cost:
+            state = trial_state
+            commands = trial_commands
+            residual = trial_residual
+            cost = trial_cost
+            torque_error_nm = trial_torque_error
+            thrust_error_n = trial_thrust_error
+            lambda_value = max(lambda_value * 0.1, 1e-6)
+            if _lm_converged(torque_error_nm, thrust_error_n, desired_thrust_n, cfg):
+                result.converged = True
+                break
+        else:
+            lambda_value = min(lambda_value * 10.0, 1e6)
+
+    result.commands = tuple(commands)
+    result.cost = cost
+    result.residual_torque_nm = torque_error_nm
+    result.residual_thrust_n = thrust_error_n
+    result.lambda_final = lambda_value
+    return result
+
+
+def lm_converged(
+    torque_error_nm: float,
+    thrust_error_n: float,
+    desired_thrust_n: float,
+    config: LmConfig | None = None,
+) -> bool:
+    """Public mirror of firmware LM convergence tolerances."""
+    return _lm_converged(torque_error_nm, thrust_error_n, desired_thrust_n, config or LmConfig())
+
+
+def _torque_seed_hint(
+    engines: Sequence[EngineGeometry],
+    desired_torque_nm: Sequence[float],
+) -> tuple[tuple[float, float], ...]:
+    """Heuristic differential TVC seed when the grid oracle is coarse."""
+    roll, pitch, yaw = desired_torque_nm
+    seed = [(0.0, 0.0) for _ in engines]
+    if len(engines) < 3:
+        return tuple(seed)
+
+    if abs(pitch) > 1e-3:
+        sign = 1.0 if pitch > 0.0 else -1.0
+        seed[0] = (sign * 3.0, seed[0][1])
+        seed[1] = (-sign * 1.5, seed[1][1])
+        seed[2] = (-sign * 1.5, seed[2][1])
+
+    if abs(roll) > 1e-3:
+        sign = 1.0 if roll > 0.0 else -1.0
+        for index in range(len(engines)):
+            roll_deg, yaw_deg = seed[index]
+            seed[index] = (roll_deg, yaw_deg + sign * 2.0)
+
+    if abs(yaw) > 1e-3:
+        sign = 1.0 if yaw > 0.0 else -1.0
+        for index in range(len(engines)):
+            roll_deg, yaw_deg = seed[index]
+            yaw_hint = sign * (2.0 if index % 2 == 0 else -2.0)
+            seed[index] = (roll_deg, yaw_deg + yaw_hint)
+
+    return tuple(seed)
+
+
+def firmware_warm_start(
+    engines: Sequence[EngineGeometry],
+    desired_torque_nm: Sequence[float],
+    desired_thrust_n: float,
+    *,
+    oracle_commands: Sequence[tuple[float, float]] | None = None,
+    oracle_torque_error_nm: float | None = None,
+) -> tuple[tuple[float, float], ...]:
+    """Allocator seed plus collective splay yaw hint, matching tv3_control_mixer cold start."""
+    oracle_error = oracle_torque_error_nm
+    if oracle_commands is None:
+        oracle = allocate(engines, desired_torque_nm, desired_thrust_n)
+        seed = list(oracle.commands)
+        if oracle_error is None:
+            oracle_error = oracle.torque_error_nm
+    else:
+        seed = list(oracle_commands)
+        if oracle_error is None:
+            oracle_error = math.inf
+
+    while len(seed) < len(engines):
+        seed.append((0.0, 0.0))
+
+    if oracle_error > 0.1 or not math.isfinite(oracle_error):
+        seed = list(_torque_seed_hint(engines, desired_torque_nm))
+
+    full_thrust, _min_splayed = thrust_envelope(engines)
+    if desired_thrust_n < full_thrust - 1e-3:
+        splay_deg = collective_throttle_yaw_deg(desired_thrust_n, engines)
+        seed = [(roll, yaw + splay_deg) for roll, yaw in seed]
+
+    return tuple(seed[: len(engines)])
+
+
+@dataclass(frozen=True)
+class LmSweepCase:
+    desired_torque_nm: tuple[float, float, float]
+    desired_thrust_n: float
+
+
+@dataclass
+class LmSweepResult:
+    case: LmSweepCase
+    reachable: bool
+    oracle_reason: str = REASON_NONE
+    oracle_torque_error_nm: float = math.inf
+    oracle_thrust_error_n: float = math.inf
+    warm_start: tuple[tuple[float, float], ...] = ()
+    lm_converged: bool = False
+    residual_torque_nm: float = math.inf
+    residual_thrust_n: float = math.inf
+    iterations_used: int = 0
+    cost: float = math.inf
+
+
+@dataclass
+class LmSweepSummary:
+    total_cases: int = 0
+    reachable_count: int = 0
+    unreachable_count: int = 0
+    lm_converged_count: int = 0
+    reachable_failed_count: int = 0
+    convergence_rate: float = 0.0
+    torque_residual_p50: float = math.nan
+    torque_residual_p95: float = math.nan
+    thrust_residual_p50: float = math.nan
+    iterations_p50: float = math.nan
+    iterations_max: int = 0
+    config: LmConfig = field(default_factory=LmConfig)
+    worst_failures: list[dict] = field(default_factory=list)
+
+
+def _span_values(low: float, high: float, steps: int) -> list[float]:
+    if steps <= 1 or abs(high - low) <= 1e-9:
+        return [0.5 * (low + high)]
+    if low <= 0.0 <= high:
+        values = [low, 0.0, high]
+        if steps > 3:
+            for index in range(1, steps - 1):
+                frac = index / (steps - 1)
+                values.append(low + frac * (high - low))
+        return sorted(set(values))
+    return [low + index * (high - low) / (steps - 1) for index in range(steps)]
+
+
+def generate_lm_sweep_cases(
+    engines: Sequence[EngineGeometry],
+    torque_limits: TorqueLimits | None = None,
+    *,
+    thrust_steps: int = 5,
+    torque_steps: int = 3,
+    full: bool = False,
+) -> list[LmSweepCase]:
+    """Build a demand grid inside the thrust envelope and torque limits."""
+    if full:
+        thrust_steps = max(thrust_steps, 10)
+        torque_steps = max(torque_steps, 7)
+
+    limits = torque_limits or TorqueLimits()
+    full_thrust, min_splayed = thrust_envelope(engines)
+    min_thrust = max(min_splayed, practical_thrust_floor(engines))
+    thrust_values = _span_values(min_thrust, full_thrust, thrust_steps)
+    roll_values = _span_values(-limits.roll_nm, limits.roll_nm, torque_steps)
+    pitch_values = _span_values(-limits.pitch_nm, limits.pitch_nm, torque_steps)
+    yaw_values = _span_values(-limits.yaw_nm, limits.yaw_nm, torque_steps)
+
+    cases: list[LmSweepCase] = []
+    seen: set[tuple[tuple[float, float, float], float]] = set()
+
+    def add_case(torque: tuple[float, float, float], thrust: float) -> None:
+        key = (torque, round(thrust, 6))
+        if key in seen:
+            return
+        seen.add(key)
+        cases.append(LmSweepCase(desired_torque_nm=torque, desired_thrust_n=thrust))
+
+    for thrust in thrust_values:
+        for roll in roll_values:
+            for pitch in pitch_values:
+                for yaw in yaw_values:
+                    add_case((roll, pitch, yaw), thrust)
+
+    add_case((0.0, 0.0, 0.0), full_thrust)
+    add_case((0.0, 0.0, 0.0), 0.8 * full_thrust)
+    return cases
+
+
+def _percentile(values: Sequence[float], fraction: float) -> float:
+    finite = sorted(value for value in values if math.isfinite(value))
+    if not finite:
+        return math.nan
+    index = min(len(finite) - 1, max(0, int(round(fraction * (len(finite) - 1)))))
+    return finite[index]
+
+
+def _physically_feasible(
+    case: LmSweepCase,
+    engines: Sequence[EngineGeometry],
+    torque_limits: TorqueLimits | None,
+) -> bool:
+    limits = torque_limits or TorqueLimits()
+    full_thrust, _ = thrust_envelope(engines)
+    min_thrust = practical_thrust_floor(engines)
+    if case.desired_thrust_n > full_thrust + 1e-3 or case.desired_thrust_n < min_thrust - 1e-3:
+        return False
+    roll, pitch, yaw = case.desired_torque_nm
+    if abs(roll) > limits.roll_nm + 1e-6:
+        return False
+    if abs(pitch) > limits.pitch_nm + 1e-6:
+        return False
+    if abs(yaw) > limits.yaw_nm + 1e-6:
+        return False
+    return bool(engines)
+
+
+def _oracle_reachable(
+    oracle: AllocationResult,
+    desired_thrust_n: float,
+    *,
+    torque_tolerance_nm: float = 0.75,
+    thrust_tolerance_frac: float = 0.08,
+) -> bool:
+    if oracle.reachable:
+        return True
+    thrust_tol = max(1.0, abs(desired_thrust_n) * thrust_tolerance_frac)
+    return oracle.torque_error_nm <= torque_tolerance_nm and oracle.thrust_error_n <= thrust_tol
+
+
+def _splay_oracle_reachable(
+    engines: Sequence[EngineGeometry],
+    case: LmSweepCase,
+    oracle: AllocationResult,
+    *,
+    torque_tolerance_nm: float = 0.75,
+    thrust_tolerance_frac: float = 0.08,
+) -> bool:
+    """Reachability after collective splay hint, matching tv3_control_mixer cold start."""
+    full_thrust, _ = thrust_envelope(engines)
+    if case.desired_thrust_n >= full_thrust - 1e-3:
+        return False
+    warm = firmware_warm_start(
+        engines,
+        case.desired_torque_nm,
+        case.desired_thrust_n,
+        oracle_commands=oracle.commands,
+    )
+    torque, thrust = plant_total_wrench(engines, warm)
+    torque_error = norm(sub(torque, case.desired_torque_nm))
+    thrust_error = abs(thrust - case.desired_thrust_n)
+    thrust_tol = max(1.0, abs(case.desired_thrust_n) * thrust_tolerance_frac)
+    return torque_error <= torque_tolerance_nm and thrust_error <= thrust_tol
+
+
+def _warm_start_reachable(
+    engines: Sequence[EngineGeometry],
+    case: LmSweepCase,
+    oracle: AllocationResult,
+    *,
+    torque_tolerance_nm: float = 2.0,
+    thrust_tolerance_frac: float = 0.12,
+) -> bool:
+    """Loose plant check at the firmware warm start."""
+    warm = firmware_warm_start(
+        engines,
+        case.desired_torque_nm,
+        case.desired_thrust_n,
+        oracle_commands=oracle.commands,
+        oracle_torque_error_nm=oracle.torque_error_nm,
+    )
+    torque, thrust = plant_total_wrench(engines, warm)
+    torque_error = norm(sub(torque, case.desired_torque_nm))
+    thrust_error = abs(thrust - case.desired_thrust_n)
+    thrust_tol = max(5.0, abs(case.desired_thrust_n) * thrust_tolerance_frac)
+    return torque_error <= torque_tolerance_nm and thrust_error <= thrust_tol
+
+
+def _sweep_reachable(
+    case: LmSweepCase,
+    engines: Sequence[EngineGeometry],
+    oracle: AllocationResult,
+    torque_limits: TorqueLimits | None,
+    *,
+    oracle_torque_tolerance_nm: float = 0.75,
+    oracle_thrust_tolerance_frac: float = 0.08,
+) -> bool:
+    if not _physically_feasible(case, engines, torque_limits):
+        return False
+    return _oracle_reachable(
+        oracle,
+        case.desired_thrust_n,
+        torque_tolerance_nm=oracle_torque_tolerance_nm,
+        thrust_tolerance_frac=oracle_thrust_tolerance_frac,
+    ) or _splay_oracle_reachable(
+        engines,
+        case,
+        oracle,
+        torque_tolerance_nm=oracle_torque_tolerance_nm,
+        thrust_tolerance_frac=oracle_thrust_tolerance_frac,
+    ) or _warm_start_reachable(
+        engines,
+        case,
+        oracle,
+        torque_tolerance_nm=max(2.0, oracle_torque_tolerance_nm * 2.0),
+        thrust_tolerance_frac=max(0.12, oracle_thrust_tolerance_frac * 1.5),
+    )
+
+
+def run_lm_sweep(
+    engines: Sequence[EngineGeometry],
+    cases: Sequence[LmSweepCase] | None = None,
+    *,
+    torque_limits: TorqueLimits | None = None,
+    config: LmConfig | None = None,
+    full: bool = False,
+    grid_steps: int = 5,
+    oracle_torque_tolerance_nm: float = 0.75,
+    oracle_thrust_tolerance_frac: float = 0.08,
+) -> tuple[LmSweepSummary, list[LmSweepResult]]:
+    """Run reachability oracle plus LM for each demand case."""
+    cfg = config or LmConfig()
+    if cases is None:
+        cases = generate_lm_sweep_cases(engines, torque_limits, full=full)
+
+    results: list[LmSweepResult] = []
+    for case in cases:
+        oracle = allocate(
+            engines,
+            case.desired_torque_nm,
+            case.desired_thrust_n,
+            torque_limits=torque_limits,
+            grid_steps=grid_steps,
+        )
+        entry = LmSweepResult(
+            case=case,
+            reachable=_sweep_reachable(
+                case,
+                engines,
+                oracle,
+                torque_limits,
+                oracle_torque_tolerance_nm=oracle_torque_tolerance_nm,
+                oracle_thrust_tolerance_frac=oracle_thrust_tolerance_frac,
+            ),
+            oracle_reason=oracle.reason,
+            oracle_torque_error_nm=oracle.torque_error_nm,
+            oracle_thrust_error_n=oracle.thrust_error_n,
+        )
+        if not entry.reachable:
+            results.append(entry)
+            continue
+
+        warm_start = firmware_warm_start(
+            engines,
+            case.desired_torque_nm,
+            case.desired_thrust_n,
+            oracle_commands=oracle.commands,
+            oracle_torque_error_nm=oracle.torque_error_nm,
+        )
+        entry.warm_start = warm_start
+        lm_result = solve_gimbal_lm(
+            engines,
+            case.desired_torque_nm,
+            case.desired_thrust_n,
+            warm_start,
+            config=cfg,
+        )
+        entry.residual_torque_nm = lm_result.residual_torque_nm
+        entry.residual_thrust_n = lm_result.residual_thrust_n
+        entry.iterations_used = lm_result.iterations_used
+        entry.cost = lm_result.cost
+        entry.lm_converged = lm_result.converged or lm_converged(
+            lm_result.residual_torque_nm,
+            lm_result.residual_thrust_n,
+            case.desired_thrust_n,
+            cfg,
+        )
+        results.append(entry)
+
+    reachable = [entry for entry in results if entry.reachable]
+    converged = [entry for entry in reachable if entry.lm_converged]
+    failed = [entry for entry in reachable if not entry.lm_converged]
+
+    summary = LmSweepSummary(
+        total_cases=len(results),
+        reachable_count=len(reachable),
+        unreachable_count=len(results) - len(reachable),
+        lm_converged_count=len(converged),
+        reachable_failed_count=len(failed),
+        convergence_rate=(len(converged) / len(reachable)) if reachable else 1.0,
+        torque_residual_p50=_percentile([entry.residual_torque_nm for entry in converged], 0.5),
+        torque_residual_p95=_percentile([entry.residual_torque_nm for entry in converged], 0.95),
+        thrust_residual_p50=_percentile([abs(entry.residual_thrust_n) for entry in converged], 0.5),
+        iterations_p50=_percentile([float(entry.iterations_used) for entry in converged], 0.5),
+        iterations_max=max((entry.iterations_used for entry in converged), default=0),
+        config=cfg,
+        worst_failures=sorted(
+            [
+                {
+                    "torque_nm": list(entry.case.desired_torque_nm),
+                    "thrust_n": entry.case.desired_thrust_n,
+                    "residual_torque_nm": entry.residual_torque_nm,
+                    "residual_thrust_n": entry.residual_thrust_n,
+                    "iterations_used": entry.iterations_used,
+                }
+                for entry in failed
+            ],
+            key=lambda item: item["residual_torque_nm"],
+            reverse=True,
+        )[:10],
+    )
+    return summary, results
+
+
+def tune_lm_config(
+    engines: Sequence[EngineGeometry],
+    *,
+    torque_limits: TorqueLimits | None = None,
+    cases: Sequence[LmSweepCase] | None = None,
+    max_trials: int = 50,
+    grid_steps: int = 5,
+    full: bool = False,
+    seed: int = 0,
+) -> tuple[LmConfig, LmSweepSummary]:
+    """Coarse random search for LmConfig that maximizes reachable convergence rate."""
+    import random
+
+    rng = random.Random(seed)
+    if cases is None:
+        cases = generate_lm_sweep_cases(engines, torque_limits, full=full)
+
+    base = LmConfig()
+    candidates: list[LmConfig] = [base]
+    for _ in range(max(0, max_trials - 1)):
+        candidates.append(
+            LmConfig(
+                max_iter=rng.choice([6, 8, 12, 16]),
+                torque_tol_nm=rng.choice([0.1, 0.15, 0.2, 0.25]),
+                lambda0=10 ** rng.uniform(-3.0, -1.0),
+                thrust_weight=rng.choice([0.5, 1.0, 2.0, 4.0]),
+                splay_weight=rng.choice([0.0, 0.05, 0.1, 0.2]),
+                fd_eps=rng.choice([0.005, 0.01, 0.02]),
+            )
+        )
+
+    best_config = base
+    best_summary, _ = run_lm_sweep(
+        engines,
+        cases,
+        torque_limits=torque_limits,
+        config=base,
+        grid_steps=grid_steps,
+    )
+    best_rate = best_summary.convergence_rate
+
+    for candidate in candidates[1:]:
+        summary, _ = run_lm_sweep(
+            engines,
+            cases,
+            torque_limits=torque_limits,
+            config=candidate,
+            grid_steps=grid_steps,
+        )
+        if summary.convergence_rate > best_rate + 1e-9:
+            best_rate = summary.convergence_rate
+            best_config = candidate
+            best_summary = summary
+
+    return best_config, best_summary
 
 
 def command_grid(engine: EngineGeometry, steps: int) -> list[tuple[float, float, float]]:
@@ -703,6 +1506,24 @@ def guidance_reachability(
         mass_kg=max(motor_reference.expected_vehicle_mass_kg, 0.1),
         position_gain=position_gain,
     )
+    working = scaled_engines(
+        engines,
+        active_mask=motor_reference.active_mask,
+        thrust_scales=thrust_scales,
+    )
+    full_thrust, min_splayed = thrust_envelope(working)
+    min_thrust = max(min_splayed, practical_thrust_floor(working))
+    if required_thrust_n > 1e-3 and (
+        required_thrust_n > full_thrust + 1e-3 or required_thrust_n < min_thrust - 1e-3
+    ):
+        return AllocationResult(
+            reachable=False,
+            reason=REASON_THRUST_ENVELOPE,
+            control_unreachable_reason=CONTROL_THRUST_ENVELOPE,
+            full_thrust_n=full_thrust,
+            min_splayed_thrust_n=min_thrust,
+        )
+
     result = allocate(
         engines,
         desired_torque,

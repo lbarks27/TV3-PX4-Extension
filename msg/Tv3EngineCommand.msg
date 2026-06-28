@@ -5,6 +5,8 @@ uint8 engine_count
 uint8 ignition_mask
 uint8 active_ignition_index
 
+uint16[4] selected_motor_index
+
 bool sequence_active
 bool sequence_complete
 

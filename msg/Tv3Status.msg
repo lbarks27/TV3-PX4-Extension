@@ -14,6 +14,11 @@ bool armed
 bool ready
 bool ignition_on
 bool ignition_confirmed
+uint8 engine_count
+uint8 ignition_mask
+uint8 active_ignition_index
+bool sequence_active
+bool sequence_complete
 bool rail_exit
 bool burnout_detected
 bool thrust_valid

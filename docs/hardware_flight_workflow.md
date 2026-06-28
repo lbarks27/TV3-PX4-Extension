@@ -11,14 +11,16 @@ controls, and recovery procedures.
 
 ## Current Hardware Target
 
-The default hardware vehicle is `config/vehicles/tv3_v1.json`:
+The focus hardware vehicle for precision landing is `config/vehicles/tv3_lander_v1.json`:
 
 - Autopilot: Cube Orange Plus
 - Carrier: mini carrier
 - Telemetry: RFD900
-- GPS: Here4 RTK rover plus Here4 RTK base
-- Vehicle: single-engine TVC ascent vehicle
-- Guidance: disabled by default
+- GPS: Here4 RTK rover plus Here4 RTK base (critical for 0.5 m absolute)
+- Vehicle: three-engine splay-throttle lander
+- Guidance: enabled via profile (lander_precision_land.json recommended for tight window)
+
+Full TV3 control modules (attitude, guidance, mixer, mode, motor) are now built into NuttX images for the lander.
 
 The PX4 target for this board is:
 

@@ -26,7 +26,7 @@ env CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" EXTERNAL_MODULES_LOCATION="${MODU
 
 if [ -d "${WORKTREE}/build/px4_sitl_default" ]; then
 	env EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
-		cmake --build "${WORKTREE}/build/px4_sitl_default" --target modules__simulation__tv3_sih
+		cmake --build "${WORKTREE}/build/px4_sitl_default" --target modules__simulation__tv3_sih modules__simulation__tv3_sih_ideal
 fi
 
 printf 'TV3 SIH SITL build ready in %s\n' "${WORKTREE}"

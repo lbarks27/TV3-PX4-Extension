@@ -11,21 +11,16 @@
 #include <uORB/uORB.h>
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
-#include <uORB/topics/actuator_servos.h>
 #include <uORB/topics/internal_combustion_engine_control.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/tv3_command.h>
-#include <uORB/topics/tv3_engine_command.h>
 #include <uORB/topics/tv3_engine_state.h>
-#include <uORB/topics/tv3_gimbal_command.h>
-#include <uORB/topics/tv3_guidance_status.h>
 #include <uORB/topics/tv3_mode_status.h>
 #include <uORB/topics/tv3_status.h>
 #include <uORB/topics/tv3_thrust.h>
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_command_ack.h>
 #include <uORB/topics/vehicle_status.h>
-#include <uORB/topics/vehicle_torque_setpoint.h>
 
 #include <stdio.h>
 #include <stdint.h>
@@ -45,43 +40,6 @@ static void copy_motor_id(char (&dst)[32], const char (&src)[32])
 static uint8_t engine_bit(int engine_index)
 {
 	return engine_index >= 0 && engine_index < 8 ? static_cast<uint8_t>(1u << engine_index) : 0;
-}
-
-static float engine_chamber_thrust_n(const tv3_engine_state_s &engine_state, int engine_index)
-{
-	if (engine_index < 0 || engine_index >= tv3_engine_state_s::MAX_ENGINES) {
-		return 0.f;
-	}
-
-	float thrust_n = engine_state.filtered_thrust_n[engine_index];
-
-	if (!PX4_ISFINITE(thrust_n) || thrust_n <= 0.f) {
-		thrust_n = engine_state.measured_thrust_n[engine_index];
-	}
-
-	if (!PX4_ISFINITE(thrust_n) || thrust_n <= 0.f) {
-		thrust_n = engine_state.expected_thrust_n[engine_index];
-	}
-
-	return PX4_ISFINITE(thrust_n) ? math::max(thrust_n, 0.f) : 0.f;
-}
-
-static float collective_throttle_yaw_deg(float desired_net_thrust_n, float total_chamber_thrust_n, float throttle_max_deg)
-{
-	// Splay is the collective secondary-axis angle on each TVC mount (manifest yaw axis).
-	// Chamber thrust stays at full motor output; net axial thrust falls as nozzles deflect.
-	if (total_chamber_thrust_n < 1.f || desired_net_thrust_n <= 0.f) {
-		return 0.f;
-	}
-
-	if (desired_net_thrust_n >= total_chamber_thrust_n - 1e-3f) {
-		return 0.f;
-	}
-
-	const float ratio = math::constrain(desired_net_thrust_n / total_chamber_thrust_n, 0.f, 1.f);
-	const float throttle_rad = acosf(ratio);
-	const float throttle_deg = throttle_rad * 57.2957795f;
-	return math::constrain(throttle_deg, 0.f, throttle_max_deg);
 }
 
 static const char *command_name(uint8_t command)
@@ -269,10 +227,6 @@ private:
 		_vehicle_status_sub.update(&_vehicle_status);
 		_tv3_thrust_sub.update(&_thrust);
 		_tv3_engine_state_sub.update(&_engine_state);
-		_tv3_guidance_status_sub.update(&_guidance_status);
-		_actuator_servos_sub.update(&_actuator_servos);
-		_tv3_gimbal_command_sub.update(&_tv3_gimbal_command);
-		_torque_setpoint_sub.update(&_torque_sp);
 
 		process_commands();
 		update_state(now);
@@ -344,7 +298,9 @@ private:
 		ack.result = result;
 		ack.target_system = cmd.source_system;
 		ack.target_component = cmd.source_component;
-		ack.from_external = true;
+		// External commands arrive with from_external=true, but MAVLink only forwards
+		// COMMAND_ACK when from_external is false (see mavlink_main.cpp).
+		ack.from_external = false;
 		_ack_pub.publish(ack);
 	}
 
@@ -439,122 +395,6 @@ private:
 				}
 			}
 
-			for (int i = 0; i < kMaxEngines; ++i) {
-				char name[20];
-				snprintf(name, sizeof(name), "CA_RK_G%u_PMAX", i);
-				p = param_find(name);
-				if (p != PARAM_INVALID) {
-					param_get(p, &_engine_pitch_max_deg[i]);
-				}
-
-				snprintf(name, sizeof(name), "CA_RK_G%u_YMAX", i);
-				p = param_find(name);
-				if (p != PARAM_INVALID) {
-					param_get(p, &_engine_yaw_max_deg[i]);
-				}
-			}
-
-			// Load full geometry for nonlinear refinement that respects nested axes and current splay
-			for (int i = 0; i < kMaxEngines; ++i) {
-				char buf[32];
-				auto gf = [&](const char *suffix, float def) -> float {
-					snprintf(buf, sizeof(buf), "CA_RK_G%u_%s", i, suffix);
-					param_t h = param_find(buf);
-					float v = def;
-					if (h != PARAM_INVALID) param_get(h, &v);
-					return v;
-				};
-				_group_pos[i](0) = gf("PX", 0.f);
-				_group_pos[i](1) = gf("PY", 0.f);
-				_group_pos[i](2) = gf("PZ", 0.f);
-
-				_group_thrust[i](0) = gf("AX", 1.f);
-				_group_thrust[i](1) = gf("AY", 0.f);
-				_group_thrust[i](2) = gf("AZ", 0.f);
-
-				_group_primary[i](0) = gf("PAX", 0.f);
-				_group_primary[i](1) = gf("PAY", -1.f);
-				_group_primary[i](2) = gf("PAZ", 0.f);
-
-				_group_secondary[i](0) = gf("YAX", 0.f);
-				_group_secondary[i](1) = gf("YAY", 0.f);
-				_group_secondary[i](2) = gf("YAZ", -1.f);
-
-				_group_pmax_rad[i] = math::radians(gf("PMAX", 5.f));
-				_group_ymin_rad[i] = math::radians(gf("YMIN", 0.f));
-				_group_ymax_rad[i] = math::radians(gf("YMAX", 5.f));
-				_group_tfrac[i] = gf("TF", _engine_count > 0 ? 1.f / _engine_count : 1.f);
-			}
-
-			p = param_find("RK_SPLAY_MAX_DEG");
-			if (p != PARAM_INVALID) {
-				param_get(p, &_splay_max_deg);
-			}
-
-			p = param_find("RK_GD_ENABLE");
-			if (p != PARAM_INVALID) {
-				param_get(p, &_guidance_enabled);
-			}
-		}
-
-		float active_chamber_thrust_n() const
-		{
-			float total_chamber_thrust_n = 0.f;
-
-			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-				if (_ignition_mask & engine_bit(i)) {
-					total_chamber_thrust_n += engine_chamber_thrust_n(_engine_state, i);
-				}
-			}
-
-			return total_chamber_thrust_n;
-		}
-
-		float collective_throttle_max_deg() const
-		{
-			float throttle_max_deg = 0.f;
-
-			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-				throttle_max_deg = math::max(throttle_max_deg, _engine_yaw_max_deg[i]);
-			}
-
-			if (throttle_max_deg <= 0.f) {
-				throttle_max_deg = _splay_max_deg;
-			}
-
-			return throttle_max_deg;
-		}
-
-		bool collective_throttle_mixer_active() const
-		{
-			if (_guidance_enabled <= 0 || _engine_count <= 1 || collective_throttle_max_deg() <= 0.f) {
-				return false;
-			}
-
-			const bool powered = _mode == tv3_status_s::MODE_IGNITION_PENDING
-					     || _mode == tv3_status_s::MODE_BOOST
-					     || _mode == tv3_status_s::MODE_COAST;
-
-			if (!powered || !_ignition_on) {
-				return false;
-			}
-
-			if (_guidance_status.timestamp == 0 || !_guidance_status.thrust_solution_valid
-			    || _guidance_status.required_thrust_n <= 0.f) {
-				return false;
-			}
-
-			return active_chamber_thrust_n() >= 1.f;
-		}
-
-		float update_collective_throttle_yaw_deg() const
-		{
-			if (!collective_throttle_mixer_active()) {
-				return 0.f;
-			}
-
-			return collective_throttle_yaw_deg(_guidance_status.required_thrust_n, active_chamber_thrust_n(),
-							   collective_throttle_max_deg());
 		}
 
 		void reset_state()
@@ -746,7 +586,8 @@ private:
 				_rail_exit = _rail_distance_m >= _rail_length_m;
 			}
 
-			const bool below_burnout_threshold = _thrust.filtered_thrust_n < _burnout_threshold_n;
+			const float burnout_thrust_n = math::max(_thrust.filtered_thrust_n, _thrust.expected_thrust_n);
+			const bool below_burnout_threshold = burnout_thrust_n < _burnout_threshold_n;
 			const hrt_abstime burn_time_us = _boost_timestamp != 0 ? now - _boost_timestamp : 0;
 
 			if (below_burnout_threshold && burn_time_us > static_cast<hrt_abstime>(_minimum_burn_ms) * 1000ULL) {
@@ -785,183 +626,6 @@ private:
 			engine.throttle_control = _ignition_on ? 1.f : 0.f;
 			_engine_pub.publish(engine);
 
-			tv3_engine_command_s engine_command{};
-			engine_command.timestamp = now;
-			engine_command.engine_count = static_cast<uint8_t>(_engine_count);
-			engine_command.ignition_mask = _ignition_mask;
-			engine_command.active_ignition_index = static_cast<uint8_t>(_ignition_sequence[_active_sequence_slot]);
-			engine_command.sequence_active = _mode == tv3_status_s::MODE_IGNITION_PENDING || _mode == tv3_status_s::MODE_BOOST;
-			engine_command.sequence_complete = _sequence_complete;
-
-			// Populate per-engine gimbal commands from the allocator's servo outputs.
-			// These represent the deflections needed for torque (attitude control).
-			// Primary (pitch/roll) and secondary (yaw) are both taken from servos.
-			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-				const int pidx = 2 * i;
-				if (pidx < actuator_servos_s::NUM_CONTROLS) {
-					const float p = _actuator_servos.control[pidx];
-					if (PX4_ISFINITE(p) && fabsf(p) > 1e-4f) {
-						engine_command.commanded_pitch_deg[i] = p * _engine_pitch_max_deg[i];
-					}
-				}
-
-				const int yidx = 2 * i + 1;
-				if (yidx < actuator_servos_s::NUM_CONTROLS) {
-					const float y = _actuator_servos.control[yidx];
-					if (PX4_ISFINITE(y) && fabsf(y) > 1e-4f) {
-						engine_command.commanded_yaw_deg[i] = y * _engine_yaw_max_deg[i];
-					}
-				}
-			}
-
-			// Fallback for primary axis if allocator servos provided nothing (e.g. some sim paths).
-			bool have_primary = false;
-			for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-				if (fabsf(engine_command.commanded_pitch_deg[i]) > 1e-4f) {
-					have_primary = true;
-					break;
-				}
-			}
-			if (!have_primary && _tv3_gimbal_command.timestamp > 0) {
-				const int n = math::min(static_cast<int>(_tv3_gimbal_command.engine_count), _engine_count);
-				for (int i = 0; i < n && i < kMaxEngines; ++i) {
-					engine_command.commanded_pitch_deg[i] = _tv3_gimbal_command.commanded_pitch_deg[i];
-				}
-			}
-
-			// Apply collective splay using exact nonlinear forward model (accounting for nested axes,
-			// current operating point splay, and actual per-engine thrusts from stagger).
-			// We take allocator's outputs (linear at zero) as starting point, then iteratively
-			// adjust the 6 angles (using the same kinematics as the SIH plant) so the resulting
-			// torques match the desired setpoint while preserving the common splay for thrust.
-			bool can_apply_splay = collective_throttle_mixer_active() && _sequence_complete && _rail_exit;
-			if (can_apply_splay) {
-				const float splay_deg = update_collective_throttle_yaw_deg();
-				const float splay_rad = math::radians(splay_deg);
-
-				// Base from allocator (in command now)
-				float p_rad[4] = {};
-				float y_alloc_rad[4] = {};
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					p_rad[i] = math::radians(engine_command.commanded_pitch_deg[i]);
-					y_alloc_rad[i] = math::radians(engine_command.commanded_yaw_deg[i]);
-				}
-
-				float init_p[4] = {};
-				float init_y[4] = {};  // total secondary = splay + diff
-				float thr[4] = {};
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					init_p[i] = p_rad[i];
-					init_y[i] = y_alloc_rad[i] + splay_rad;
-					thr[i] = engine_chamber_thrust_n(_engine_state, i);
-				}
-
-				// Load/update desired torque
-				_torque_setpoint_sub.update(&_torque_sp);
-				matrix::Vector3f des{_torque_sp.xyz[0], _torque_sp.xyz[1], _torque_sp.xyz[2]};
-
-				int mask = _ignition_mask;
-
-				// Local helpers using loaded geometry (respects nesting and current splay)
-				auto rot = [](const matrix::Vector3f& v, const matrix::Vector3f& ax, float r) -> matrix::Vector3f {
-					if (fabsf(r) < 1e-6f) return v;
-					matrix::Vector3f k = ax;
-					float nn = k.norm();
-					if (nn > 1e-6f) k /= nn;
-					float c = cosf(r), s = sinf(r);
-					float kdv = k.dot(v);
-					return v * c + k.cross(v) * s + k * kdv * (1.f - c);
-				};
-
-				auto dir_at = [&](int i, float pr, float yr) -> matrix::Vector3f {
-					if (i < 0 || i >= kMaxEngines) return matrix::Vector3f{1.f, 0.f, 0.f};
-					matrix::Vector3f d = _group_thrust[i];
-					if (fabsf(pr) > 1e-6f) d = rot(d, _group_primary[i], pr);
-					if (fabsf(yr) > 1e-6f) {
-						matrix::Vector3f ya = _group_secondary[i];
-						if (fabsf(pr) > 1e-6f) ya = rot(ya, _group_primary[i], pr);
-						d = rot(d, ya, yr);
-					}
-					float n = d.norm();
-					if (n > 1e-6f) d /= n;
-					return d;
-				};
-
-				auto grp_tq = [&](int i, float pr, float yr) -> matrix::Vector3f {
-					if (thr[i] < 0.5f) return matrix::Vector3f{};
-					matrix::Vector3f f = dir_at(i, pr, yr) * thr[i];
-					return _group_pos[i].cross(f);
-				};
-
-				auto tot_tq = [&](const float prs[4], const float yrs[4]) -> matrix::Vector3f {
-					matrix::Vector3f tt{0,0,0};
-					for (int j = 0; j < _engine_count; ++j) {
-						if (mask & (1 << j)) tt += grp_tq(j, prs[j], yrs[j]);
-					}
-					return tt;
-				};
-
-				// Iterative refinement (gradient / coordinate descent on torque error)
-				for (int it = 0; it < 6; ++it) {
-					matrix::Vector3f cur = tot_tq(init_p, init_y);
-					matrix::Vector3f err = des - cur;
-					if (err.norm() < 0.15f) break;
-
-					for (int v = 0; v < _engine_count * 2; ++v) {
-						int j = v / 2;
-						if ((mask & (1 << j)) == 0 || thr[j] < 0.5f) continue;
-						bool is_pri = (v % 2 == 0);
-						float &aa = is_pri ? init_p[j] : init_y[j];
-						float eps = 0.01f;
-						float sav = aa;
-						aa = sav + eps;
-						matrix::Vector3f tp = tot_tq(init_p, init_y);
-						aa = sav - eps;
-						matrix::Vector3f tm = tot_tq(init_p, init_y);
-						aa = sav;
-						matrix::Vector3f dtd = (tp - tm) / (2 * eps);
-						float g = dtd.dot(err);
-						float step = -g / (dtd.norm_squared() + 1e-4f) * 0.7f;
-						aa += step;
-					}
-
-					// clamp
-					for (int j = 0; j < _engine_count; ++j) {
-						init_p[j] = math::constrain(init_p[j], -_group_pmax_rad[j], _group_pmax_rad[j]);
-						init_y[j] = math::constrain(init_y[j], _group_ymin_rad[j], _group_ymax_rad[j]);
-					}
-				}
-
-				// Restore exact common splay (preserve thrust modulation)
-				int na = 0;
-				float sumy = 0.f;
-				for (int j = 0; j < _engine_count; ++j) {
-					if ((mask & (1 << j)) && thr[j] > 0.5f) { sumy += init_y[j]; na++; }
-				}
-				if (na > 0) {
-					float avg = sumy / na;
-					float d = splay_rad - avg;
-					for (int j = 0; j < _engine_count; ++j) {
-						if ((mask & (1 << j)) && thr[j] > 0.5f) init_y[j] += d;
-					}
-				}
-
-				// write back (final totals)
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					if (_ignition_mask & engine_bit(i)) {
-						engine_command.commanded_pitch_deg[i] = math::degrees(init_p[i]);
-						engine_command.commanded_yaw_deg[i] = math::degrees(init_y[i]);
-						engine_command.commanded_splay_deg[i] = splay_deg;
-					}
-				}
-			} else {
-				for (int i = 0; i < _engine_count && i < kMaxEngines; ++i) {
-					engine_command.commanded_splay_deg[i] = 0.f;
-				}
-			}
-
-			_engine_command_pub.publish(engine_command);
-
 		tv3_status_s status{};
 		status.timestamp = now;
 		status.mode = _mode;
@@ -970,6 +634,11 @@ private:
 		status.ready = _mode >= tv3_status_s::MODE_READY && _mode != tv3_status_s::MODE_ABORT;
 		status.ignition_on = _ignition_on;
 		status.ignition_confirmed = _thrust.ignition_confirmed;
+		status.engine_count = static_cast<uint8_t>(_engine_count);
+		status.ignition_mask = _ignition_mask;
+		status.active_ignition_index = static_cast<uint8_t>(_ignition_sequence[_active_sequence_slot]);
+		status.sequence_active = _mode == tv3_status_s::MODE_IGNITION_PENDING || _mode == tv3_status_s::MODE_BOOST;
+		status.sequence_complete = _sequence_complete;
 		status.rail_exit = _rail_exit;
 		status.burnout_detected = _mode == tv3_status_s::MODE_COAST;
 		status.thrust_valid = _thrust.valid;
@@ -1066,24 +735,6 @@ private:
 		vehicle_status_s _vehicle_status{};
 		tv3_thrust_s _thrust{};
 		tv3_engine_state_s _engine_state{};
-		tv3_guidance_status_s _guidance_status{};
-		actuator_servos_s _actuator_servos{};
-		tv3_gimbal_command_s _tv3_gimbal_command{};
-		vehicle_torque_setpoint_s _torque_sp{};
-		float _engine_pitch_max_deg[kMaxEngines]{};
-		float _engine_yaw_max_deg[kMaxEngines]{};
-		float _splay_max_deg{0.f};
-		int32_t _guidance_enabled{0};
-
-		// Per-group geometry from CA_RK_* params (to support refinement at large splay / nested axes)
-		matrix::Vector3f _group_pos[kMaxEngines]{};
-		matrix::Vector3f _group_thrust[kMaxEngines]{};
-		matrix::Vector3f _group_primary[kMaxEngines]{};
-		matrix::Vector3f _group_secondary[kMaxEngines]{};
-		float _group_pmax_rad[kMaxEngines]{};
-		float _group_ymin_rad[kMaxEngines]{};
-		float _group_ymax_rad[kMaxEngines]{};
-		float _group_tfrac[kMaxEngines]{};
 
 		uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
@@ -1091,14 +742,9 @@ private:
 		uORB::Subscription _tv3_command_sub{ORB_ID(tv3_command)};
 		uORB::Subscription _tv3_thrust_sub{ORB_ID(tv3_thrust)};
 		uORB::Subscription _tv3_engine_state_sub{ORB_ID(tv3_engine_state)};
-		uORB::Subscription _tv3_guidance_status_sub{ORB_ID(tv3_guidance_status)};
-		uORB::Subscription _actuator_servos_sub{ORB_ID(actuator_servos)};
-		uORB::Subscription _tv3_gimbal_command_sub{ORB_ID(tv3_gimbal_command)};
-		uORB::Subscription _torque_setpoint_sub{ORB_ID(vehicle_torque_setpoint)};
 
 		uORB::Publication<tv3_command_s> _command_pub{ORB_ID(tv3_command)};
 		uORB::Publication<internal_combustion_engine_control_s> _engine_pub{ORB_ID(internal_combustion_engine_control)};
-		uORB::Publication<tv3_engine_command_s> _engine_command_pub{ORB_ID(tv3_engine_command)};
 		uORB::Publication<tv3_status_s> _status_pub{ORB_ID(tv3_status)};
 	uORB::Publication<tv3_mode_status_s> _compat_status_pub{ORB_ID(tv3_mode_status)};
 	uORB::Publication<vehicle_command_ack_s> _ack_pub{ORB_ID(vehicle_command_ack)};

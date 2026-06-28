@@ -20,7 +20,7 @@ The core loop is:
 
 The repo now defaults to the smallest useful launch/boost slice:
 
-- Built by default: `tv3_motor_model`, `tv3_load_cell`, `tv3_mode_manager`, `tv3_att_control`, and manifest-gated `tv3_guidance`.
+- Built by default: `tv3_motor_model`, `tv3_load_cell`, `tv3_mode_manager`, `tv3_attitude`, `tv3_control_mixer`, and manifest-gated `tv3_guidance`.
 - Started by default in SITL overlays: control allocator, engine control, motor model, load cell, mode manager, and attitude control.
 - Disabled by default at startup: autonomous guidance starts only when the selected vehicle manifest sets `guidance.enable: 1`.
 - Verified locally: motor catalog normalization, vehicle asset generation, and generated `RK_*` parameter names matching firmware definitions.

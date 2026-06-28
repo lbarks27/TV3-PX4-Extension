@@ -15,6 +15,3 @@ if [ ! -x "${PYTHON}" ]; then
 	echo "Run ./scripts/setup_viz_env.sh first." >&2
 	exit 1
 fi
-
-# Rerun viewer spawn and `rerun file.rrd` both resolve the executable from PATH.
-export PATH="${VENV}/bin:${PATH}"

@@ -13,11 +13,13 @@
 #include <uORB/topics/home_position.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/tv3_guidance_status.h>
+#include <uORB/topics/tv3_engine_state.h>
 #include <uORB/topics/tv3_motor_reference.h>
 #include <uORB/topics/tv3_status.h>
 #include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/distance_sensor.h>
 
 #include <cmath>
 
@@ -40,6 +42,25 @@ static constexpr uint8_t kLandingApproach = 0;
 static constexpr uint8_t kLandingSkip = 1;
 static constexpr uint8_t kWaypointFlyThrough = 0;
 static constexpr uint8_t kWaypointPositionHold = 1;
+
+static float engine_chamber_thrust_n(const tv3_engine_state_s &engine_state, int engine_index)
+{
+	if (engine_index < 0 || engine_index >= tv3_engine_state_s::MAX_ENGINES) {
+		return 0.f;
+	}
+
+	float thrust_n = engine_state.filtered_thrust_n[engine_index];
+
+	if (!PX4_ISFINITE(thrust_n) || thrust_n <= 0.f) {
+		thrust_n = engine_state.measured_thrust_n[engine_index];
+	}
+
+	if (!PX4_ISFINITE(thrust_n) || thrust_n <= 0.f) {
+		thrust_n = engine_state.expected_thrust_n[engine_index];
+	}
+
+	return PX4_ISFINITE(thrust_n) ? math::max(thrust_n, 0.f) : 0.f;
+}
 
 struct MissionPoint {
 	Vector3f position{};
@@ -182,7 +203,9 @@ private:
 		_groundtruth_position_sub.update(&_groundtruth_position);
 		_home_position_sub.update(&_home_position);
 		_motor_reference_sub.update(&_motor_reference);
+		_engine_state_sub.update(&_engine_state);
 		_tv3_status_sub.update(&_tv3_status);
+		_distance_sensor_sub.update(&_distance_sensor);
 
 		const hrt_abstime now = hrt_absolute_time();
 		update_thrust_envelope();
@@ -199,9 +222,12 @@ private:
 	void update_parameters()
 	{
 		_enabled = read_param_int32("RK_GD_ENABLE", _enabled);
+		_boost_full_thrust = read_param_int32("RK_GD_BOOST_FULL", _boost_full_thrust);
+		_boost_attitude_only = read_param_int32("RK_GD_BOOST_ATT", _boost_attitude_only);
 		_splay_max_deg = read_param_float("RK_SPLAY_MAX_DEG", _splay_max_deg);
 		_torque_pitch_max = read_param_float("RK_TQ_P_MAX", _torque_pitch_max);
 		_torque_yaw_max = read_param_float("RK_TQ_Y_MAX", _torque_yaw_max);
+		_torque_roll_max = read_param_float("RK_TQ_R_MAX", _torque_roll_max);
 		_takeoff_alt_m = read_param_float("RK_GD_TAKE_ALT", _takeoff_alt_m);
 		_apex_alt_m = read_param_float("RK_GD_APEX_ALT", _apex_alt_m);
 		_position_gain = read_param_float("RK_GD_POS_P", _position_gain);
@@ -284,6 +310,7 @@ private:
 		_last_required_thrust_n = 0.f;
 		_estimated_torque_pitch_nm = 0.f;
 		_estimated_torque_yaw_nm = 0.f;
+		_estimated_torque_roll_nm = 0.f;
 		_thrust_solution_valid = _motor_reference.loaded && mass_kg > 0.01f;
 		_control_solution_valid = _thrust_solution_valid;
 		_control_unreachable_reason = tv3_guidance_status_s::CONTROL_OK;
@@ -313,7 +340,18 @@ private:
 				  : math::max(_min_twr, 0.1f);
 
 		const float minimum_thrust_n = mass_kg * kGravityMps2 * twr;
-		const bool thrust_ok = _available_thrust_n >= minimum_thrust_n;
+		bool thrust_ok = _available_thrust_n >= minimum_thrust_n;
+
+		// Hover-window boost uses position-scheduled thrust; do not abort ascent while chamber
+		// thrust is still sufficient to climb even if it is below sustained-hover TWR.
+		if (!thrust_ok
+		    && candidate_phase == tv3_guidance_status_s::PHASE_LAUNCH_ASCENT
+		    && _ascent_mode == kAscentHoverWindow
+		    && (_tv3_status.mode == tv3_status_s::MODE_BOOST
+			|| _tv3_status.mode == tv3_status_s::MODE_IGNITION_PENDING)) {
+			thrust_ok = _available_thrust_n >= 0.5f * mass_kg * kGravityMps2;
+		}
+
 		const bool impulse_ok = _impulse_margin_ns >= 0.f;
 		_thrust_solution_valid = thrust_ok && impulse_ok;
 		_control_solution_valid = _thrust_solution_valid;
@@ -395,13 +433,16 @@ private:
 		_control_unreachable_reason = tv3_guidance_status_s::CONTROL_OK;
 		_estimated_torque_pitch_nm = 0.f;
 		_estimated_torque_yaw_nm = 0.f;
+		_estimated_torque_roll_nm = 0.f;
 
 		if (!_control_solution_valid) {
 			return false;
 		}
 
 		float max_thrust_n = 0.f;
+		float min_splayed_thrust_n = 0.f;
 		bool have_active_engine = false;
+		const float cos_splay = _splay_max_deg > 0.f ? cosf(_splay_max_deg * kDegToRad) : 1.f;
 
 		for (int i = 0; i < _motor_reference.engine_count && i < 4; ++i) {
 			if ((_motor_reference.active_mask & (1u << i)) == 0) {
@@ -410,6 +451,7 @@ private:
 
 			const float thrust = math::max(_motor_reference.expected_thrust_n_engine[i], 0.f);
 			max_thrust_n += thrust;
+			min_splayed_thrust_n += thrust * cos_splay;
 			have_active_engine = true;
 		}
 
@@ -429,17 +471,41 @@ private:
 			return false;
 		}
 
+		if (required_thrust_n > 1e-3f && min_splayed_thrust_n > 1.f
+		    && required_thrust_n < min_splayed_thrust_n - 1.f) {
+			_control_solution_valid = false;
+			_control_unreachable_reason = tv3_guidance_status_s::CONTROL_THRUST_ENVELOPE;
+			return false;
+		}
+
 		const float horiz_speed = sqrtf(_last_velocity_sp(0) * _last_velocity_sp(0)
 						+ _last_velocity_sp(1) * _last_velocity_sp(1));
 		if (horiz_speed > 0.5f) {
 			const float mass_kg = math::max(_motor_reference.expected_vehicle_mass_kg, 0.1f);
 			const float lateral_accel = mass_kg * math::min(horiz_speed * _position_gain, 20.f);
-			const float lever_arm_m = 0.12f;
+			float lever_arm_m = 0.12f;
+
+			for (int i = 0; i < _motor_reference.engine_count && i < 4; ++i) {
+				if ((_motor_reference.active_mask & (1u << i)) == 0) {
+					continue;
+				}
+
+				char buf[24];
+				snprintf(buf, sizeof(buf), "CA_RK_G%u_PY", i);
+				const float py = read_param_float(buf, 0.f);
+				snprintf(buf, sizeof(buf), "CA_RK_G%u_PZ", i);
+				const float pz = read_param_float(buf, 0.f);
+				lever_arm_m = math::max(lever_arm_m, sqrtf(py * py + pz * pz));
+			}
+
 			const float estimated_torque = lateral_accel * lever_arm_m;
 			_estimated_torque_pitch_nm = estimated_torque;
 			_estimated_torque_yaw_nm = estimated_torque;
+			_estimated_torque_roll_nm = estimated_torque;
 
-			if (estimated_torque > _torque_pitch_max + 1e-3f || estimated_torque > _torque_yaw_max + 1e-3f) {
+			if (estimated_torque > _torque_pitch_max + 1e-3f
+			    || estimated_torque > _torque_yaw_max + 1e-3f
+			    || estimated_torque > _torque_roll_max + 1e-3f) {
 				_control_solution_valid = false;
 				_control_unreachable_reason = tv3_guidance_status_s::CONTROL_TORQUE_ENVELOPE;
 				return false;
@@ -464,6 +530,49 @@ private:
 			return;
 		}
 
+		if (_tv3_status.mode == tv3_status_s::MODE_BOOST
+		    || _tv3_status.mode == tv3_status_s::MODE_IGNITION_PENDING) {
+
+			if (_boost_attitude_only > 0) {
+				_last_required_thrust_n = 0.f;
+				_control_solution_valid = true;
+				return;
+			}
+
+			// Hover-window ascent throttles via collective splay to track the 8 m hold target
+			// instead of riding full chamber thrust to apogee.
+			if (_ascent_mode == kAscentHoverWindow
+			    && _tv3_status.mode == tv3_status_s::MODE_BOOST) {
+				apply_position_thrust_command(guidance_pos, false);
+				return;
+			}
+
+			// Hold live chamber thrust during powered ascent so the LM is not asked to throttle
+			// via collective splay while TVC travel is clamped for boost (hover-window profiles
+			// otherwise command 5–25 N against 50+ N chamber thrust).
+			float chamber_thrust_n = 0.f;
+
+			for (int i = 0; i < _motor_reference.engine_count && i < tv3_engine_state_s::MAX_ENGINES; ++i) {
+				if ((_motor_reference.active_mask & (1u << i)) != 0) {
+					chamber_thrust_n += engine_chamber_thrust_n(_engine_state, i);
+				}
+			}
+
+			_last_required_thrust_n = chamber_thrust_n > 1.f ? chamber_thrust_n : _available_thrust_n;
+			_control_solution_valid = require_control_solution();
+
+			if (_control_solution_valid) {
+				_thrust_solution_valid = true;
+			}
+
+			return;
+		}
+
+		apply_position_thrust_command(guidance_pos, true);
+	}
+
+	void apply_position_thrust_command(const vehicle_local_position_s &guidance_pos, bool abort_on_control_failure)
+	{
 		const float mass_kg = math::max(_motor_reference.expected_vehicle_mass_kg, 0.1f);
 		const Vector3f position{guidance_pos.x, guidance_pos.y, guidance_pos.z};
 		const Vector3f velocity{guidance_pos.vx, guidance_pos.vy, guidance_pos.vz};
@@ -474,8 +583,11 @@ private:
 
 		_last_required_thrust_n = math::constrain(mass_kg * (kGravityMps2 - a_z_cmd), 0.f, _available_thrust_n);
 		_control_solution_valid = require_control_solution();
-		if (!_control_solution_valid) {
+
+		if (!_control_solution_valid && abort_on_control_failure) {
 			_thrust_solution_valid = false;
+			_guidance_unreachable_reason = tv3_guidance_status_s::GUIDANCE_CONTROL;
+			enter_no_solution_state();
 		}
 	}
 
@@ -673,12 +785,32 @@ private:
 		const float altitude_m = -rel_pos(2);
 
 		if (_tv3_status.mode == tv3_status_s::MODE_IGNITION_PENDING || _tv3_status.mode == tv3_status_s::MODE_BOOST) {
+			if (_boost_attitude_only > 0) {
+				_phase = tv3_guidance_status_s::PHASE_LAUNCH_ASCENT;
+				_mission_started = true;
+				_thrust_solution_valid = true;
+				_control_solution_valid = true;
+				_last_target = position;
+				_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
+				_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
+				return;
+			}
+
 			if (!require_thrust_solution(tv3_guidance_status_s::PHASE_LAUNCH_ASCENT)) {
 				return;
 			}
 
 			_phase = tv3_guidance_status_s::PHASE_LAUNCH_ASCENT;
 			_mission_started = true;
+
+			if (_boost_full_thrust > 0 && _ascent_mode != kAscentHoverWindow
+			    && _tv3_status.mode == tv3_status_s::MODE_BOOST) {
+				_last_target = position;
+				_last_velocity_sp = Vector3f{0.f, 0.f, 0.f};
+				_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
+				return;
+			}
+
 			Vector3f ascent_target{0.f, 0.f, -math::max(_apex_alt_m, _takeoff_alt_m)};
 			Vector3f lateral_target{};
 
@@ -689,7 +821,7 @@ private:
 			}
 
 			_last_target = _origin + ascent_target;
-			apply_vertical_velocity_limits(position);
+			apply_vertical_velocity_limits(position, velocity);
 			_current_yaw_sp = update_current_yaw_sp(_last_velocity_sp);
 			return;
 		}
@@ -882,20 +1014,36 @@ private:
 		_setpoint_pub.publish(setpoint);
 	}
 
-	void apply_vertical_velocity_limits(const Vector3f &position)
+	void apply_vertical_velocity_limits(const Vector3f &position, const Vector3f &velocity)
 	{
-		const Vector3f error = _last_target - position;
-		const float distance = error.norm();
-		const float speed = math::constrain(distance * _position_gain, 0.f, _max_velocity_m_s);
-		_last_velocity_sp = distance > 1e-3f ? (error / distance) * speed : Vector3f{0.f, 0.f, 0.f};
+		// Drone-style horizontal outer loop: position error -> velocity setpoint with damping.
+		const Vector3f horiz_error{_last_target(0) - position(0), _last_target(1) - position(1), 0.f};
+		const float horiz_distance = horiz_error.norm();
+		const float horiz_speed = math::constrain(horiz_distance * _position_gain, 0.f, _max_velocity_m_s);
+		Vector3f horiz_velocity_sp = horiz_distance > 1e-3f
+					       ? (horiz_error / horiz_distance) * horiz_speed
+					       : Vector3f{0.f, 0.f, 0.f};
 
-		if (error(2) < -0.1f) {
-			_last_velocity_sp(2) = math::max(_last_velocity_sp(2), -math::max(_max_climb_rate_m_s, 1.f));
-		} else if (error(2) > 0.1f) {
-			_last_velocity_sp(2) = math::min(_last_velocity_sp(2), math::max(_max_descent_rate_m_s, 1.f));
+		const float lateral_damp_gain = _position_gain * 2.f;
+		horiz_velocity_sp(0) -= lateral_damp_gain * velocity(0);
+		horiz_velocity_sp(1) -= lateral_damp_gain * velocity(1);
+
+		_last_velocity_sp(0) = horiz_velocity_sp(0);
+		_last_velocity_sp(1) = horiz_velocity_sp(1);
+
+		const float z_error = _last_target(2) - position(2);
+		const float vertical_damp_gain = _position_gain * 2.f;
+		float vz_sp = _position_gain * z_error - vertical_damp_gain * velocity(2);
+
+		if (z_error < -0.1f) {
+			vz_sp = math::max(vz_sp, -math::max(_max_climb_rate_m_s, 1.f));
+		} else if (z_error > 0.1f) {
+			vz_sp = math::min(vz_sp, math::max(_max_descent_rate_m_s, 1.f));
 		} else {
-			_last_velocity_sp(2) = 0.f;
+			vz_sp = 0.f;
 		}
+
+		_last_velocity_sp(2) = vz_sp;
 	}
 
 	float update_current_yaw_sp(const Vector3f &velocity_sp)
@@ -912,6 +1060,8 @@ private:
 	}
 
 	int32_t _enabled{1};
+	int32_t _boost_full_thrust{0};
+	int32_t _boost_attitude_only{0};
 	int32_t _sim_groundtruth_fallback{0};
 	float _takeoff_alt_m{35.f};
 	float _apex_alt_m{120.f};
@@ -928,6 +1078,7 @@ private:
 	float _splay_max_deg{5.f};
 	float _torque_pitch_max{10.f};
 	float _torque_yaw_max{10.f};
+	float _torque_roll_max{8.f};
 	uint8_t _ascent_mode{kAscentLaunch};
 	uint8_t _apogee_mode{kApogeeTrack};
 	uint8_t _landing_mode{kLandingApproach};
@@ -956,6 +1107,7 @@ private:
 	float _impulse_margin_ns{0.f};
 	float _estimated_torque_pitch_nm{0.f};
 	float _estimated_torque_yaw_nm{0.f};
+	float _estimated_torque_roll_nm{0.f};
 	float _landing_delta_v_required_m_s{0.f};
 	float _landing_delta_v_margin_m_s{0.f};
 	float _abort_delta_v_required_m_s{0.f};
@@ -966,10 +1118,12 @@ private:
 
 	vehicle_local_position_s _local_position{};
 	vehicle_local_position_s _groundtruth_position{};
+	distance_sensor_s _distance_sensor{};
 	home_position_s _home_position{};
 	vehicle_status_s _vehicle_status{};
 	tv3_status_s _tv3_status{};
 	tv3_motor_reference_s _motor_reference{};
+	tv3_engine_state_s _engine_state{};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _local_position_sub{ORB_ID(vehicle_local_position)};
@@ -978,6 +1132,8 @@ private:
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _tv3_status_sub{ORB_ID(tv3_status)};
 	uORB::Subscription _motor_reference_sub{ORB_ID(tv3_motor_reference)};
+	uORB::Subscription _engine_state_sub{ORB_ID(tv3_engine_state)};
+	uORB::Subscription _distance_sensor_sub{ORB_ID(distance_sensor)};
 	uORB::Publication<trajectory_setpoint_s> _setpoint_pub{ORB_ID(trajectory_setpoint)};
 	uORB::Publication<tv3_guidance_status_s> _status_pub{ORB_ID(tv3_guidance_status)};
 };

@@ -2,11 +2,15 @@
 
 Out-of-tree PX4 modules, uORB messages, and tooling for thrust-vector-controlled TV3 vehicles.
 
-- Single-engine TVC ascent vehicle (`tv3_v1`)
+Focus: three-engine splay-throttle lander (`tv3_lander_v1`) for launch + lateral translation + precision landing (target 0.5 m window on real hardware).
+
 - Three-engine splay-throttle lander vehicle (`tv3_lander_v1`)
+- (tv3_v1 single-engine ascent support is secondary / legacy)
 
 Designed for `EXTERNAL_MODULES_LOCATION` builds against PX4 v1.16.1. Vehicle manifests in `config/vehicles/` drive generated SIH/SITL runtime payloads and motor reference data.
 Flight profiles in `config/flight_profiles/` define scenario targets that can be loaded on top of those vehicle manifests for SITL runs.
+
+Use `TV3_FLIGHT_PROFILE=config/flight_profiles/lander_precision_land.json` (acceptance 0.5 m) for tight landing work.
 
 ## Documentation
 

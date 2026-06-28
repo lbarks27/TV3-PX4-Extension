@@ -38,8 +38,7 @@ Vehicle manifests and flight profiles are JSON under `config/vehicles/*.json` an
 ./scripts/setup_viz_env.sh        # once
 ./scripts/validate_viz_commands.sh  # optional headless smoke test
 ./scripts/plot_ulog.sh --latest            # 2D timeseries PNG
-./scripts/plot_ulog_replay.sh --latest     # interactive 3D trajectory (PyVista)
-./scripts/plot_ulog_replay.sh --latest --rerun  # timed playback (Rerun)
+# open the archived `.ulg` in Foxglove for timeline and topic inspection
 ```
 
 Switch vehicles with `TV3_VEHICLE_CONFIG=config/vehicles/tv3_v1.json`. Load a scenario with `TV3_FLIGHT_PROFILE=config/flight_profiles/single_engine_ascent.json`.
@@ -180,6 +179,7 @@ Each archive includes copied `.ulg` files, `manifest.txt`, `logger_topics.txt` w
 
 ## Troubleshooting
 
+- **Boost instability (~3 s)**: see [boost_stability_issues.md](boost_stability_issues.md) for logged hypotheses (BS-001–BS-029) and SIH discrimination experiments.
 - **Stale PX4 or Hawkeye process**: run the `pkill` commands in the visual-run section above before restarting.
 - **Hawkeye not found**: set `HAWKEYE_CMD` to the executable, install via Homebrew, or place `Hawkeye.app` in `/Applications`.
 - **Profile commands do not arm/launch**: confirm QGC is not holding the serial/UDP link exclusively; check `TV3_RUN_PROFILE_COMMANDS` is not `0`.
@@ -203,18 +203,18 @@ The SIH plant (`tv3_sih`) and the TV3 PX4 extension prioritize deterministic, fa
 - **No variable-mass rocket effects**: Propellant expulsion carries no relative velocity momentum in the model.
 
 ### Control and Allocation Path in SIH
-- Gimbal angles on `tv3_engine_command` (roll/primary + yaw/splay secondary) come from `tv3_mode_manager`, which forwards allocator servos + computes collective splay yaw when `RK_GD_ENABLE` and guidance thrust solution is valid.
-- The allocator (via patch) and `tv3_att_control` produce torques; splay throttle for lander is handled outside the allocator as a thrust modulator.
-- **Not addressed in SIH**: the full nonlinear kinematics are present and match the Python reference model, but the complete closed-loop "commanded wrench → allocator → actuator commands → plant" for all cases relies on mode_manager bridging.
+- Gimbal angles on `tv3_engine_command` (roll/primary + yaw/splay secondary) come from `tv3_control_mixer`, which forwards allocator servos + computes collective splay yaw when `RK_GD_ENABLE` and guidance thrust solution is valid.
+- The allocator (via patch) and `tv3_attitude` produce torques; splay throttle for lander is handled in `tv3_control_mixer` as a thrust modulator.
+- **Not addressed in SIH**: the full nonlinear kinematics are present and match the Python reference model, but the complete closed-loop "commanded wrench → allocator → actuator commands → plant" for all cases relies on `tv3_control_mixer` bridging allocator servos to `tv3_engine_command`.
 
 ### Broader Extension Complexity and Duplication
-- **Custom modules**: `tv3_mode_manager`, `tv3_guidance`, `tv3_att_control`, `tv3_motor_model`, load-cell modules, and `tv3_sih` implement TV3-specific behaviors (solid-motor ignition confirmation via load cell, splay-as-throttle, custom command 31010, per-engine state, mass reporting from curves). Stock PX4 components are reused (control allocator via CA_RK, attitude, uORB pubs, SITL sensors) where possible.
+- **Custom modules**: `tv3_mode_manager`, `tv3_guidance`, `tv3_attitude`, `tv3_control_mixer`, `tv3_motor_model`, load-cell modules, and `tv3_sih` implement TV3-specific behaviors (solid-motor ignition confirmation via load cell, splay-as-throttle, custom command 31010, per-engine state, mass reporting from curves). Stock PX4 components are reused (control allocator via CA_RK, attitude, uORB pubs, SITL sensors) where possible.
 - **Dual parameter sets**: `CA_RK_*` (for patched `ActuatorEffectivenessTV3` and allocator) + `RK_*` (for TV3 modules). Both are generated from the same vehicle manifest by `tools/generate_vehicle_assets.py`. This duplication exists because the allocator lives in a PX4 patch.
 - **Manifest richness vs runtime use**: `config/vehicles/*.json` contains detailed `physical_model` (links, joints, inertias about origin, CAD refs) for intake, validation (`check_physical_manifests.sh`), and future use. Runtime only consumes a flattened subset via generated params + `tv3_motor_model` curves.
 - **Allocator implementation**: TV3 effectiveness is supplied by a ~772-line patch (`patches/px4/0001-tv3-control-allocation.patch`) adding `EffectivenessSource::TV3` and `ActuatorEffectivenessTV3`. Not yet an upstream or pure external module.
 - **Model duplication (thrust selection, splay, geometry)**:
   - Thrust fallback (filtered → measured → expected) is reimplemented in C++ modules and mirrored in Python tools for offline checks.
-  - Collective splay yaw computation (`collective_throttle_yaw_deg` using acos or search) exists in `tv3_mode_manager` and the Python allocator/reference.
+  - Collective splay yaw computation (`collective_throttle_yaw_deg` using acos or search) exists in `tv3_control_mixer` and the Python allocator/reference.
   - Gimbal direction math is duplicated between `tv3_sih` (`engine_thrust_dir_body_angles`) and `tools/tv3_control_allocator.py` (`plant_thrust_direction`).
   **Not addressed**: a single shared implementation (would require new common library, headers, or moving logic to Python-only reference + codegen).
 - **Script and generator surface**: ~30 scripts + generators + schemas + staging for microSD, barebones, checks, plots. This supports reproducible gates, hardware bring-up, and Monte Carlo, at the cost of surface area.

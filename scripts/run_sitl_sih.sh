@@ -15,7 +15,22 @@ export HAWKEYE_UDP_PORT="${HAWKEYE_UDP_PORT:-19410}"
 # Hawkeye 0.3.x maps unknown MAV_TYPE values (including TV3's MAV_TYPE_ROCKET=9)
 # to the stock quad model. MAV_TYPE_FIXED_WING keeps the TV3 mesh in the -fw slot.
 export TV3_HAWKEYE_VIS="${TV3_HAWKEYE_VIS:-1}"
+export TV3_SIH_IDEAL="${TV3_SIH_IDEAL:-0}"
 export TV3_SIMULATOR="${TV3_SIMULATOR:-sih}"
+
+# Non-interactive runs (CI, redirected logs, headless wrapper) should not block on pxh>.
+if [ "${TV3_PX4_INTERACTIVE:-0}" != "1" ] && [ ! -t 1 ]; then
+	export TV3_PX4_DAEMON="${TV3_PX4_DAEMON:-1}"
+fi
+
+if [ "${TV3_PX4_KILL_STALE:-1}" = "1" ]; then
+	if pgrep -x px4 >/dev/null 2>&1; then
+		echo "stopping stale px4 instance before SIH launch"
+		pkill -INT -x px4 >/dev/null 2>&1 || true
+		sleep 1
+		pkill -9 -x px4 >/dev/null 2>&1 || true
+	fi
+fi
 
 WORKTREE=$("${SCRIPT_DIR}/prepare_px4_tree.sh")
 MODULES_LOCATION="${TV3_ROOT}/.work/tv3-px4-extension"
@@ -117,13 +132,17 @@ echo "PX4_SIM_MODEL:      ${PX4_SIM_MODEL}"
 echo "PX4_SYS_AUTOSTART:  ${PX4_SYS_AUTOSTART}"
 echo "Hawkeye UDP:        ${HAWKEYE_UDP_PORT}"
 echo "TV3_HAWKEYE_VIS:    ${TV3_HAWKEYE_VIS}"
+echo "TV3_SIH_IDEAL:      ${TV3_SIH_IDEAL}"
 echo "TV3_LOG_RUN_ID:     ${TV3_LOG_RUN_ID}"
+echo "TV3_PX4_DAEMON:     ${TV3_PX4_DAEMON:-0}"
 echo
 
-env CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
-	make -C "${WORKTREE}" px4_sitl_default DONT_RUN=1
-
 PX4_BUILD_DIR="${WORKTREE}/build/px4_sitl_default"
+
+if [ "${TV3_SKIP_BUILD:-0}" != "1" ] || [ ! -x "${PX4_BUILD_DIR}/bin/px4" ]; then
+	env CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
+		make -C "${WORKTREE}" px4_sitl_default DONT_RUN=1
+fi
 mkdir -p "${PX4_BUILD_DIR}/etc/logging"
 cp -p "${REPO_ROOT}/build/barebones/runtime/etc/logging/logger_topics.txt" \
 	"${PX4_BUILD_DIR}/etc/logging/logger_topics.txt"
@@ -157,9 +176,17 @@ fi
 
 env EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
 	TV3_MOTOR_ROOT="${TV3_MOTOR_ROOT}" \
+	TV3_SIH_IDEAL="${TV3_SIH_IDEAL}" \
 	PX4_SIM_MODEL="${PX4_SIM_MODEL}" \
 	PX4_SIMULATOR="${PX4_SIMULATOR}" \
 	./bin/px4 "${PX4_ARGS[@]}" &
 PX4_PID=$!
 
-wait "${PX4_PID}"
+# px4 -d daemonizes: the shell child returns immediately while the sim keeps running.
+if [ "${TV3_PX4_DAEMON:-0}" = "1" ]; then
+	while kill -0 "${PX4_PID}" >/dev/null 2>&1 || pgrep -x px4 >/dev/null 2>&1; do
+		sleep 1
+	done
+else
+	wait "${PX4_PID}"
+fi

@@ -9,5 +9,10 @@ set(config_msg_list_external
 	Tv3ModeStatus.msg
 	Tv3GuidanceStatus.msg
 	Tv3LoadCell.msg
+	Tv3AllocatorStatus.msg
+	Tv3ControlAuthority.msg
+	Tv3PlantWrench.msg
+	vehicle_attitude_euler.msg
+	vehicle_attitude_groundtruth_euler.msg
 	PARENT_SCOPE
 )

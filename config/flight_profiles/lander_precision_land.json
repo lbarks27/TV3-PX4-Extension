@@ -1,0 +1,95 @@
+{
+  "schema": "tv3_flight_profile_v1",
+  "name": "lander_precision_land",
+  "description": "Focused profile for launch + translate + land within 0.5 m window on tv3_lander_v1. Tight acceptance, low descent rates, landing-focused gains.",
+  "vehicle": "tv3_lander_v1",
+  "scenario": {
+    "type": "waypoint_track",
+    "simulator": "sih",
+    "intent": "Exercise full mission then achieve and hold <0.5 m at landing point for real-vehicle correlation.",
+    "simulated_only": false
+  },
+  "motor_selection": {
+    "sim_burn_time_scale": 6.0
+  },
+  "controller": {
+    "attitude_p": {
+      "free": 4.0,
+      "boost": 10.0
+    },
+    "rate_p": {
+      "free": 1.0,
+      "boost": 2.5
+    }
+  },
+  "guidance": {
+    "enable": 1,
+    "ascent_mode": "hover_window",
+    "apogee_mode": "skip",
+    "landing_mode": "approach",
+    "takeoff_alt_m": 6.0,
+    "apex_alt_m": 10.0,
+    "pos_p": 0.35,
+    "tilt_gain": 0.10,
+    "tilt_max_deg": 18.0,
+    "vel_max_m_s": 3.0,
+    "vel_up_m_s": 1.5,
+    "vel_dn_m_s": 1.2,
+    "yaw_deg": 0.0,
+    "hold_alt_m": 5.0,
+    "acceptance_m": 0.5,
+    "min_twr": 1.15,
+    "landing_twr": 1.25,
+    "min_remaining_impulse_ns": 0.0,
+    "wp1_n_m": 3.0,
+    "wp1_e_m": 0.0,
+    "wp1_d_m": -5.0,
+    "wp2_n_m": 0.0,
+    "wp2_e_m": 2.0,
+    "wp2_d_m": -4.0,
+    "wp2_mode": "position_hold",
+    "wp2_hold_s": 4.0,
+    "wp3_n_m": 0.0,
+    "wp3_e_m": 0.0,
+    "wp3_d_m": -3.0,
+    "land_n_m": 0.0,
+    "land_e_m": 0.0,
+    "land_d_m": 0.0,
+    "sim_groundtruth_fallback": 1
+  },
+  "mission_profile": {
+    "first_free_flight_gate": "single_engine_ascent",
+    "required_sim_gates": [
+      "hover_window",
+      "waypoint_track",
+      "landing_approach"
+    ]
+  },
+  "commands": [
+    {
+      "at_s": 0.0,
+      "action": "arm_and_ready"
+    },
+    {
+      "at_s": 1.0,
+      "action": "launch"
+    }
+  ],
+  "review": {
+    "min_hover_s": 3.0,
+    "acceptance_m": 0.5,
+    "required_topics": [
+      "tv3_guidance_status",
+      "trajectory_setpoint",
+      "vehicle_local_position",
+      "vehicle_local_position_groundtruth",
+      "control_allocator_status",
+      "tv3_engine_state"
+    ],
+    "success_criteria": [
+      "position error stays within 0.5 m acceptance during final landing window",
+      "landing approach reaches PHASE_COMPLETE with low target_distance_m",
+      "control remains active below 0.5 m altitude in landing phase"
+    ]
+  }
+}

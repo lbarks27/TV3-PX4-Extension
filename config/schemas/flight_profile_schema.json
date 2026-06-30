@@ -1,18 +1,18 @@
 {
-  "schema": "tv3_flight_profile_schema_v1",
-  "description": "Source contract for TV3 flight profiles. A flight profile describes a repeatable simulator or flight scenario for a selected vehicle. Profiles are separate from vehicle manifests so geometry, hardware, propulsion, and control configuration stay in config/vehicles while scenario targets can be swapped.\n",
+  "schema": "tv3_flight_profile_schema_v2",
+  "description": "Flight profile contract for TV3. Vehicle geometry and hardware live in config/vehicles; profiles describe scenario targets and runtime control phase mapping.",
   "required_sections": [
     "schema",
     "name",
     "vehicle",
     "scenario",
-    "guidance",
+    "control",
     "mission_profile"
   ],
   "generator_behavior": {
     "consumed_now": {
-      "guidance": "shallow overlay on the selected vehicle manifest guidance block",
-      "mission_profile": "shallow overlay on the selected vehicle manifest mission_profile block"
+      "control": "maps lifecycle phases to per-module modes; emits RK_CTRL_* params",
+      "mission_profile": "traceability and gate metadata"
     },
     "copied_for_traceability": [
       "generated runtime profile under etc/flight_profiles",
@@ -26,78 +26,56 @@
       "review"
     ]
   },
-  "vehicle": {
-    "required": [
-      "vehicle name from config/vehicles, for example tv3_v1 or tv3_lander_v1"
-    ]
+  "control": {
+    "description": "Maps tv3_sm_status lifecycle modes to per-module operating modes. Consumed at runtime via RK_CTRL_* params.",
+    "phase_fields": {
+      "name": "human-readable phase label",
+      "on_mode": "tv3_sm_status mode constant: MODE_ARMED_STANDBY, MODE_READY, MODE_IGNITION_PENDING, MODE_BOOST, MODE_COAST, MODE_ABORT",
+      "modules": {
+        "guidance": "off | up | waypoint_fly_through",
+        "attitude": "off | on",
+        "mixer": "off | torque_only | torque_and_thrust",
+        "load_cell": "off | monitor"
+      }
+    },
+    "example": {
+      "phases": [
+        {
+          "name": "standby",
+          "on_mode": "MODE_ARMED_STANDBY",
+          "modules": {
+            "guidance": "off",
+            "attitude": "off",
+            "mixer": "off",
+            "load_cell": "monitor"
+          }
+        },
+        {
+          "name": "boost_up",
+          "on_mode": "MODE_BOOST",
+          "modules": {
+            "guidance": "up",
+            "attitude": "on",
+            "mixer": "torque_only",
+            "load_cell": "monitor"
+          }
+        }
+      ]
+    }
   },
   "scenario": {
     "required": [
-      "type, for example ascent, ignition_sequence, hover_window, waypoint_track, landing_approach, abort_fault",
-      "simulator, for example gz",
-      "intent, a short reason this scenario exists"
-    ]
-  },
-  "guidance": {
-    "allowed_fields": [
-      "enable",
-      "takeoff_alt_m",
-      "apex_alt_m",
-      "pos_p",
-      "vel_max_m_s",
-      "vel_up_m_s",
-      "vel_dn_m_s",
-      "yaw_deg",
-      "hold_alt_m",
-      "acceptance_m",
-      "min_twr",
-      "landing_twr",
-      "min_remaining_impulse_ns",
-      "wp1_n_m",
-      "wp1_e_m",
-      "wp1_d_m",
-      "wp2_n_m",
-      "wp2_e_m",
-      "wp2_d_m",
-      "wp3_n_m",
-      "wp3_e_m",
-      "wp3_d_m",
-      "land_n_m",
-      "land_e_m",
-      "land_d_m",
-      "sim_groundtruth_fallback",
-      "boost_full_thrust",
-      "boost_attitude_only",
-      "ascent_mode",
-      "apogee_mode",
-      "landing_mode",
-      "wp1_mode",
-      "wp2_mode",
-      "wp3_mode",
-      "wp1_hold_s",
-      "wp2_hold_s",
-      "wp3_hold_s",
-      "wp1_acceptance_m",
-      "wp2_acceptance_m",
-      "wp3_acceptance_m",
-      "wp1_cruise_m_s",
-      "wp2_cruise_m_s",
-      "wp3_cruise_m_s"
+      "type",
+      "simulator",
+      "intent"
     ]
   },
   "mission_profile": {
     "required": [
-      "required_sim_gates",
-      "acceptance criteria or review metrics before claiming the scenario passed"
+      "required_sim_gates"
     ]
   },
   "commands": {
-    "note": "Optional future command timeline. This is where launch, abort, reset, fault injection, and offboard/GCS events should be described before scripts execute them automatically.\n"
-  },
-  "environment": {
-    "note": "Optional future wind, gravity, sensor noise, and initial condition settings."
-  },
-  "review": {
-    "note": "Optional required ULog topics, plots, and pass/fail metrics for archived runs."
+    "note": "Optional timed launch/abort/reset timeline for host scripts."
   }
 }

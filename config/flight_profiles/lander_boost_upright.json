@@ -1,47 +1,67 @@
 {
-  "schema": "tv3_flight_profile_v1",
+  "schema": "tv3_flight_profile_v2",
   "name": "lander_boost_upright",
-  "description": "Boost-only upright ascent: full chamber thrust, no altitude thrust scheduling, attitude holds the launch vector.",
+  "description": "Boost-only upright ascent: guidance publishes up-setpoint, attitude tracks with BetterController, mixer runs torque-only LM.",
   "vehicle": "tv3_lander_v1",
   "scenario": {
     "type": "boost_upright",
     "simulator": "sih",
-    "intent": "Isolate boost-phase attitude stability without hover-window thrust lowering or lateral guidance.",
+    "intent": "Isolate boost-phase attitude stability with the simplified module stack.",
     "simulated_only": true
   },
-  "guidance": {
-    "enable": 1,
-    "ascent_mode": "launch_ascent",
-    "apogee_mode": "skip",
-    "landing_mode": "skip",
-    "boost_full_thrust": 1,
-    "takeoff_alt_m": 500.0,
-    "apex_alt_m": 500.0,
-    "pos_p": 0.0,
-    "tilt_gain": 0.0,
-    "tilt_max_deg": 0.0,
-    "vel_max_m_s": 0.0,
-    "vel_up_m_s": 0.0,
-    "vel_dn_m_s": 0.0,
-    "yaw_deg": 0.0,
-    "hold_alt_m": 500.0,
-    "acceptance_m": 50.0,
-    "min_twr": 1.05,
-    "landing_twr": 1.15,
-    "min_remaining_impulse_ns": 0.0,
-    "wp1_n_m": 0.0,
-    "wp1_e_m": 0.0,
-    "wp1_d_m": 0.0,
-    "wp2_n_m": 0.0,
-    "wp2_e_m": 0.0,
-    "wp2_d_m": 0.0,
-    "wp3_n_m": 0.0,
-    "wp3_e_m": 0.0,
-    "wp3_d_m": 0.0,
-    "land_n_m": 0.0,
-    "land_e_m": 0.0,
-    "land_d_m": 0.0,
-    "sim_groundtruth_fallback": 1
+  "control": {
+    "phases": [
+      {
+        "name": "standby",
+        "on_mode": "MODE_ARMED_STANDBY",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "ready",
+        "on_mode": "MODE_READY",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "ignition",
+        "on_mode": "MODE_IGNITION_PENDING",
+        "modules": {
+          "guidance": "up",
+          "attitude": "on",
+          "mixer": "torque_only",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "boost_up",
+        "on_mode": "MODE_BOOST",
+        "modules": {
+          "guidance": "up",
+          "attitude": "on",
+          "mixer": "torque_only",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "coast",
+        "on_mode": "MODE_COAST",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      }
+    ]
   },
   "mission_profile": {
     "first_free_flight_gate": "single_engine_ascent",
@@ -64,18 +84,20 @@
     "min_boost_s": 3.0,
     "max_angular_rate_deg_s": 360.0,
     "required_topics": [
-      "tv3_engine_command",
-      "tv3_engine_state",
+      "tv3_sm_modes",
+      "tv3_gd_att_sp",
+      "tv3_gd_thr_sp",
+      "tv3_mix_eng_cmd",
+      "tv3_lc_eng_st",
       "vehicle_attitude",
       "vehicle_angular_velocity",
-      "vehicle_local_position",
       "vehicle_torque_setpoint",
-      "tv3_allocator_status"
+      "tv3_mix_alloc_st"
     ],
     "success_criteria": [
-      "vehicle remains in boost with full chamber thrust command",
-      "attitude stays near the launch vector without hover-window thrust modulation",
-      "angular rates stay bounded through the boost window"
+      "guidance publishes up attitude setpoint during boost",
+      "attitude produces bounded torque setpoints",
+      "mixer publishes tv3_mix_eng_cmd during boost"
     ]
   }
 }

@@ -1,0 +1,110 @@
+{
+  "schema": "tv3_flight_profile_v2",
+  "name": "lander_waypoint_flythrough",
+  "description": "Boost-phase waypoint fly-through to a point 200 m up, 5 m north, and 5 m east of launch.",
+  "vehicle": "tv3_lander_v1",
+  "scenario": {
+    "type": "waypoint_flythrough",
+    "simulator": "sih",
+    "intent": "Validate GUIDANCE_WP_FLY attitude pointing during powered flight.",
+    "simulated_only": true
+  },
+  "guidance": {
+    "wp1_n_m": 5.0,
+    "wp1_e_m": 5.0,
+    "wp1_d_m": -200.0,
+    "acceptance_m": 5.0,
+    "pos_p": 0.15,
+    "vel_max_m_s": 12.0,
+    "sim_groundtruth_fallback": 1
+  },
+  "control": {
+    "phases": [
+      {
+        "name": "standby",
+        "on_mode": "MODE_ARMED_STANDBY",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "ready",
+        "on_mode": "MODE_READY",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "ignition",
+        "on_mode": "MODE_IGNITION_PENDING",
+        "modules": {
+          "guidance": "waypoint_fly_through",
+          "attitude": "on",
+          "mixer": "torque_only",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "boost_waypoint",
+        "on_mode": "MODE_BOOST",
+        "modules": {
+          "guidance": "waypoint_fly_through",
+          "attitude": "on",
+          "mixer": "torque_only",
+          "load_cell": "monitor"
+        }
+      },
+      {
+        "name": "coast",
+        "on_mode": "MODE_COAST",
+        "modules": {
+          "guidance": "off",
+          "attitude": "off",
+          "mixer": "off",
+          "load_cell": "monitor"
+        }
+      }
+    ]
+  },
+  "mission_profile": {
+    "first_free_flight_gate": "single_engine_ascent",
+    "required_sim_gates": [
+      "sih_force_response",
+      "waypoint_track"
+    ]
+  },
+  "commands": [
+    {
+      "at_s": 0.0,
+      "action": "arm_and_ready"
+    },
+    {
+      "at_s": 1.0,
+      "action": "launch"
+    }
+  ],
+  "review": {
+    "required_topics": [
+      "tv3_sm_modes",
+      "tv3_gd_att_sp",
+      "tv3_gd_thr_sp",
+      "tv3_mix_eng_cmd",
+      "tv3_lc_eng_st",
+      "vehicle_attitude",
+      "vehicle_local_position",
+      "vehicle_angular_velocity",
+      "vehicle_torque_setpoint",
+      "tv3_mix_alloc_st"
+    ],
+    "success_criteria": [
+      "guidance enters waypoint_fly_through at ignition",
+      "vehicle reaches within acceptance_m of the commanded waypoint"
+    ]
+  }
+}

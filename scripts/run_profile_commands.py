@@ -13,7 +13,7 @@ from pymavlink import mavutil
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_hover_window.json"
+DEFAULT_PROFILE = REPO_ROOT / "config/flight_profiles/lander_boost_upright.json"
 TV3_COMMAND = 31010
 TV3_ACTIONS = {
     "launch": 1.0,

@@ -102,7 +102,7 @@
     "motor_com_x_m": 0.0,
     "motor_loaded_mass_kg": 0.75,
     "motor_dry_mass_kg": 0.28,
-    "rail_length_m": 3.5,
+    "rail_length_m": 0,
     "tvc_max_deg": 35.0,
     "tvc_slew_dps": 220.0,
     "ca_reference_thrust_n": 92.64,

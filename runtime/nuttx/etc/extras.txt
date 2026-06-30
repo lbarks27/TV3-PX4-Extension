@@ -8,14 +8,10 @@ then
 fi
 
 ads1115 start -X -b 2 -a 0x48
-control_allocator start
-tv3_motor_model start
 tv3_load_cell start
-tv3_mode_manager start
-tv3_control_mixer start
-tv3_attitude start
+tv3_state_machine start
 tv3_guidance start
-# Optional debug:
-# tv3_load_cell_telemetry start
+tv3_attitude start
+tv3_control_mixer start
 mavlink stream -d /dev/ttyACM0 -s NAMED_VALUE_FLOAT -r 10
 mavlink stream -d /dev/ttyACM0 -s DEBUG_VECT -r 10

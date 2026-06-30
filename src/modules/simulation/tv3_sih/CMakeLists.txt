@@ -3,6 +3,8 @@ px4_add_module(
 	MAIN tv3_sih
 	SRCS
 		tv3_sih.cpp
+	INCLUDES
+		${CMAKE_CURRENT_SOURCE_DIR}/../../..
 )
 
 if(PX4_PLATFORM MATCHES "posix")

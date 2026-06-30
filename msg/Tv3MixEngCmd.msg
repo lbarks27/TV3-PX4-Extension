@@ -1,0 +1,28 @@
+
+uint64 timestamp
+
+uint8 MAX_ENGINES = 4
+uint8 engine_count
+uint8 ignition_mask
+uint8 active_ignition_index
+
+uint16 selected_motor_index_0
+uint16 selected_motor_index_1
+uint16 selected_motor_index_2
+uint16 selected_motor_index_3
+
+bool sequence_active
+bool sequence_complete
+
+float32 commanded_pitch_deg_0
+float32 commanded_pitch_deg_1
+float32 commanded_pitch_deg_2
+float32 commanded_pitch_deg_3
+float32 commanded_yaw_deg_0
+float32 commanded_yaw_deg_1
+float32 commanded_yaw_deg_2
+float32 commanded_yaw_deg_3
+float32 commanded_splay_deg_0
+float32 commanded_splay_deg_1
+float32 commanded_splay_deg_2
+float32 commanded_splay_deg_3

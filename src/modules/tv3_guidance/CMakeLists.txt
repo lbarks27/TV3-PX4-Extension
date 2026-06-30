@@ -3,4 +3,7 @@ px4_add_module(
 	MAIN tv3_guidance
 	SRCS
 		tv3_guidance.cpp
+		tv3_guidance_fsm.cpp
+	INCLUDES
+		${CMAKE_CURRENT_SOURCE_DIR}/../..
 )

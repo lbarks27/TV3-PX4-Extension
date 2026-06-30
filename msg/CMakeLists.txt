@@ -1,17 +1,15 @@
 set(config_msg_list_external
-	Tv3Command.msg
-	Tv3Status.msg
-	Tv3Thrust.msg
-	Tv3MotorReference.msg
-	Tv3EngineCommand.msg
-	Tv3GimbalCommand.msg
-	Tv3EngineState.msg
-	Tv3ModeStatus.msg
-	Tv3GuidanceStatus.msg
-	Tv3LoadCell.msg
-	Tv3AllocatorStatus.msg
-	Tv3ControlAuthority.msg
-	Tv3PlantWrench.msg
+	Tv3SmCmd.msg
+	Tv3SmStatus.msg
+	Tv3LcThrust.msg
+	Tv3MixEngCmd.msg
+	Tv3LcEngSt.msg
+	Tv3LcCh.msg
+	Tv3MixAllocSt.msg
+	Tv3SihWrench.msg
+	Tv3SmModes.msg
+	Tv3GdAttSp.msg
+	Tv3GdThrSp.msg
 	vehicle_attitude_euler.msg
 	vehicle_attitude_groundtruth_euler.msg
 	PARENT_SCOPE

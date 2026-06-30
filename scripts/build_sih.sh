@@ -7,7 +7,7 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 TV3_ROOT=$(cd -- "${REPO_ROOT}/.." && pwd)
 
 export TV3_VEHICLE_CONFIG="${TV3_VEHICLE_CONFIG:-config/vehicles/tv3_lander_v1.json}"
-export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_hover_window.json}"
+export TV3_FLIGHT_PROFILE="${TV3_FLIGHT_PROFILE:-config/flight_profiles/lander_boost_upright.json}"
 export PX4_SIMULATOR="${PX4_SIMULATOR:-sihsim}"
 export PX4_SIM_MODEL="${PX4_SIM_MODEL:-tv3_lander}"
 
@@ -26,7 +26,7 @@ env CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:-}" EXTERNAL_MODULES_LOCATION="${MODU
 
 if [ -d "${WORKTREE}/build/px4_sitl_default" ]; then
 	env EXTERNAL_MODULES_LOCATION="${MODULES_LOCATION}" \
-		cmake --build "${WORKTREE}/build/px4_sitl_default" --target modules__simulation__tv3_sih modules__simulation__tv3_sih_ideal
+		cmake --build "${WORKTREE}/build/px4_sitl_default" --target modules__simulation__tv3_sih
 fi
 
 printf 'TV3 SIH SITL build ready in %s\n' "${WORKTREE}"

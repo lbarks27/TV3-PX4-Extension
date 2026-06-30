@@ -54,25 +54,17 @@ PY
 from pathlib import Path
 import sys
 
-params = Path(sys.argv[1])
 post_path = Path(sys.argv[2])
-guidance_enabled = False
-for raw_line in params.read_text().splitlines():
-	fields = raw_line.split("\t")
-	if len(fields) >= 4 and fields[2] == "RK_GD_ENABLE":
-		guidance_enabled = float(fields[3]) != 0.0
-		break
 
 lines = post_path.read_text().splitlines()
 lines = [line for line in lines if line.strip() != "tv3_guidance start"]
 
-if guidance_enabled:
-    insert_after = "tv3_mode_manager start"
-    try:
-        index = lines.index(insert_after) + 1
-    except ValueError:
-        index = len(lines)
-    lines.insert(index, "tv3_guidance start")
+insert_after = "tv3_state_machine start"
+try:
+    index = lines.index(insert_after) + 1
+except ValueError:
+    index = len(lines)
+lines.insert(index, "tv3_guidance start")
 
 post_path.write_text("\n".join(lines) + "\n")
 PY
@@ -114,6 +106,9 @@ git -C "${WORKTREE}" submodule update --init --recursive --jobs 8 -- \
 
 for patch in "${REPO_ROOT}"/patches/px4/*.patch; do
 	[ -f "${patch}" ] || continue
+	case "$(basename "${patch}")" in
+	0001-tv3-control-allocation.patch) continue ;;
+	esac
 	git -C "${WORKTREE}" apply --reject "${patch}" >/dev/null 2>&1 || true
 done
 
@@ -126,57 +121,12 @@ repo_root = Path(sys.argv[1])
 worktree = Path(sys.argv[2])
 vehicle_config = Path(sys.argv[3])
 flight_profile = Path(sys.argv[4]) if sys.argv[4] else None
-patch = (repo_root / "patches/px4/0001-tv3-control-allocation.patch").read_text()
 
 def write_text_if_changed(path: Path, text: str) -> None:
 	current = path.read_text() if path.exists() else None
 	if current != text:
 		path.parent.mkdir(parents=True, exist_ok=True)
 		path.write_text(text)
-
-def extract_added_file(patch_text: str, relative_path: str) -> str:
-	header = f"diff --git a/{relative_path} b/{relative_path}"
-	block = patch_text.split(header, 1)[1].split("\ndiff --git ", 1)[0]
-	lines = []
-
-	for line in block.splitlines():
-		if line.startswith("+++ ") or line.startswith("--- ") or line.startswith("@@"):
-			continue
-		if line.startswith("+"):
-			lines.append(line[1:])
-
-	return "\n".join(lines).rstrip("\n") + "\n"
-
-module_yaml = worktree / "src/modules/control_allocator/module.yaml"
-text = module_yaml.read_text()
-
-text = text.replace("                15: Spacecraft 3D\n            default: 0\n", "                15: Spacecraft 3D\n                16: TV3\n            default: 0\n", 1)
-
-param_marker = "+        # tv3 TVC\n"
-tv3_marker = "+            16: # TV3\n"
-module_patch = patch.split("diff --git a/src/modules/control_allocator/module.yaml b/src/modules/control_allocator/module.yaml", 1)[1]
-module_patch = module_patch.split("--- a/src/modules/control_allocator/VehicleActuatorEffectiveness/apogee_f10_mass_curve.hpp", 1)[0]
-param_block_raw = module_patch.split(param_marker, 1)[1].split(tv3_marker, 1)[0]
-tv3_block_raw = module_patch.split(tv3_marker, 1)[1]
-
-def strip_plus(block: str) -> str:
-	lines = []
-	for line in block.splitlines():
-		if line.startswith("+"):
-			lines.append(line[1:])
-	return "\n".join(lines)
-
-param_block = strip_plus(param_block_raw).rstrip("\n")
-tv3_block = strip_plus(tv3_block_raw).rstrip("\n")
-
-if "# tv3 TVC" not in text:
-	insert_at = text.index("        # Tilts\n")
-	text = text[:insert_at] + param_block + "\n\n" + text[insert_at:]
-
-if "16: # TV3" not in text:
-	text = text.rstrip("\n") + "\n\n" + tv3_block + "\n"
-
-module_yaml.write_text(text)
 
 commander = worktree / "src/modules/commander/Commander.cpp"
 commander_text = commander.read_text()
@@ -208,7 +158,7 @@ if "RK_ENABLE" not in mode_management_text:
 		"#endif /* CONSTRAINED_FLASH */",
 		"\t\t}\n"
 		"\t}\n\n"
-		"\t// TV3 uses tv3_mode_manager for launch sequencing. Hide standard PX4 selectable\n"
+		"\t// TV3 uses tv3_state_machine for launch sequencing. Hide standard PX4 selectable\n"
 		"\t// modes from GCS menus when the ascent manager is enabled (RK_ENABLE=1).\n"
 		"\tparam_t rk_enable = param_find(\"RK_ENABLE\");\n\n"
 		"\tif (rk_enable != PARAM_INVALID) {\n"
@@ -223,64 +173,6 @@ if "RK_ENABLE" not in mode_management_text:
 		1,
 	)
 	write_text_if_changed(mode_management, mode_management_text)
-
-control_allocator_hpp = worktree / "src/modules/control_allocator/ControlAllocator.hpp"
-control_allocator_hpp_text = control_allocator_hpp.read_text()
-if "#include <ActuatorEffectivenessTV3.hpp>" not in control_allocator_hpp_text:
-	control_allocator_hpp_text = control_allocator_hpp_text.replace(
-		"#include <ActuatorEffectivenessHelicopterCoaxial.hpp>\n",
-		"#include <ActuatorEffectivenessHelicopterCoaxial.hpp>\n"
-		"#include <ActuatorEffectivenessTV3.hpp>\n",
-		1,
-	)
-if "\t\tTV3 = 16," not in control_allocator_hpp_text:
-	control_allocator_hpp_text = control_allocator_hpp_text.replace(
-		"\t\tSPACECRAFT_3D = 14,\n",
-		"\t\tSPACECRAFT_3D = 14,\n"
-		"\t\tTV3 = 16,\n",
-		1,
-	)
-write_text_if_changed(control_allocator_hpp, control_allocator_hpp_text)
-
-control_allocator_cpp = worktree / "src/modules/control_allocator/ControlAllocator.cpp"
-control_allocator_cpp_text = control_allocator_cpp.read_text()
-if "EffectivenessSource::TV3" not in control_allocator_cpp_text:
-	control_allocator_cpp_text = control_allocator_cpp_text.replace(
-		"\t\tcase EffectivenessSource::SPACECRAFT_3D:\n"
-		"\t\t\t// spacecraft_allocation does allocation and publishes directly to actuator_motors topic\n"
-		"\t\t\tbreak;\n\n"
-		"\t\tdefault:\n",
-		"\t\tcase EffectivenessSource::SPACECRAFT_3D:\n"
-		"\t\t\t// spacecraft_allocation does allocation and publishes directly to actuator_motors topic\n"
-		"\t\t\tbreak;\n\n"
-		"\t\tcase EffectivenessSource::TV3:\n"
-		"\t\t\ttmp = new ActuatorEffectivenessTV3(this);\n"
-		"\t\t\tbreak;\n\n"
-		"\t\tdefault:\n",
-		1,
-	)
-	write_text_if_changed(control_allocator_cpp, control_allocator_cpp_text)
-
-vehicle_effectiveness = worktree / "src/modules/control_allocator/VehicleActuatorEffectiveness"
-for relative_path in (
-	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.hpp",
-	"src/modules/control_allocator/VehicleActuatorEffectiveness/ActuatorEffectivenessTV3.cpp",
-):
-	write_text_if_changed(worktree / relative_path, extract_added_file(patch, relative_path))
-
-vehicle_effectiveness_cmake = vehicle_effectiveness / "CMakeLists.txt"
-vehicle_effectiveness_cmake_text = vehicle_effectiveness_cmake.read_text()
-if "ActuatorEffectivenessTV3.cpp" not in vehicle_effectiveness_cmake_text:
-	vehicle_effectiveness_cmake_text = vehicle_effectiveness_cmake_text.replace(
-		"\tActuatorEffectivenessRoverAckermann.hpp\n"
-		"\tActuatorEffectivenessRoverAckermann.cpp\n",
-		"\tActuatorEffectivenessRoverAckermann.hpp\n"
-		"\tActuatorEffectivenessRoverAckermann.cpp\n"
-		"\tActuatorEffectivenessTV3.hpp\n"
-		"\tActuatorEffectivenessTV3.cpp\n",
-		1,
-	)
-	write_text_if_changed(vehicle_effectiveness_cmake, vehicle_effectiveness_cmake_text)
 
 cmake_lists = worktree / "CMakeLists.txt"
 cmake_text = cmake_lists.read_text()
@@ -338,25 +230,17 @@ if [ -n "${GENERATED_PARAM_FILE}" ]; then
 from pathlib import Path
 import sys
 
-params = Path(sys.argv[1])
 post_path = Path(sys.argv[2])
-guidance_enabled = False
-for raw_line in params.read_text().splitlines():
-	fields = raw_line.split("\t")
-	if len(fields) >= 4 and fields[2] == "RK_GD_ENABLE":
-		guidance_enabled = float(fields[3]) != 0.0
-		break
 
 lines = post_path.read_text().splitlines()
 lines = [line for line in lines if line.strip() != "tv3_guidance start"]
 
-if guidance_enabled:
-    insert_after = "tv3_mode_manager start"
-    try:
-        index = lines.index(insert_after) + 1
-    except ValueError:
-        index = len(lines)
-    lines.insert(index, "tv3_guidance start")
+insert_after = "tv3_state_machine start"
+try:
+    index = lines.index(insert_after) + 1
+except ValueError:
+    index = len(lines)
+lines.insert(index, "tv3_guidance start")
 
 post_path.write_text("\n".join(lines) + "\n")
 PY

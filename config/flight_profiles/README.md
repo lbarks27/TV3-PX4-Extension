@@ -35,13 +35,18 @@ TV3_FLIGHT_PROFILE=config/flight_profiles/lander_waypoint_track.json \
 ./scripts/prepare_px4_tree.sh
 ```
 
-Today the generator applies the profile's `guidance` block to generated PX4
-`RK_GD_*` params and overlays `mission_profile` metadata for traceability.
-`scripts/run_sitl_sih.sh` starts `scripts/run_profile_commands.py` by default,
+Today the generator should apply the profile's `control.phases` block to `RK_CTRL_*`
+params (per-module modes keyed by `tv3_sm_status` lifecycle mode). Legacy `guidance`
+blocks are deprecated in the simplified stack. `mission_profile` remains traceability
+metadata. `scripts/run_sitl_sih.sh` starts `scripts/run_profile_commands.py` by default,
 which executes profile command timelines such as arm and launch over MAVLink.
+
+See `config/schemas/flight_profile_schema.json` and `config/flight_profiles/lander_boost_upright.json`
+for the v2 `control.phases` shape.
 
 ## Current Starter Profiles (lander precision focus)
 
+- `lander_boost_upright.json`: simplified stack boost-upright gate (v2 `control.phases`).
 - `lander_hover_window.json`: short local hover for `tv3_lander_v1`.
 - `lander_offset_hover_window.json`: lateral translate + hover.
 - `lander_waypoint_track.json`: launch + waypoints + landing.

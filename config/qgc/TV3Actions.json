@@ -4,21 +4,21 @@
   "actions": [
     {
       "label": "TV3 Launch",
-      "description": "Send MAV_CMD_USER_1 command 31010 with param1=1 to request launch through tv3_mode_manager.",
+      "description": "Send MAV_CMD_USER_1 command 31010 with param1=1 to request launch through tv3_state_machine.",
       "mavCmd": 31010,
       "compId": 1,
       "param1": 1
     },
     {
       "label": "TV3 Abort",
-      "description": "Send MAV_CMD_USER_1 command 31010 with param1=2 to request abort through tv3_mode_manager.",
+      "description": "Send MAV_CMD_USER_1 command 31010 with param1=2 to request abort through tv3_state_machine.",
       "mavCmd": 31010,
       "compId": 1,
       "param1": 2
     },
     {
       "label": "TV3 Reset",
-      "description": "Send MAV_CMD_USER_1 command 31010 with param1=3 to reset tv3_mode_manager to READY when armed.",
+      "description": "Send MAV_CMD_USER_1 command 31010 with param1=3 to reset tv3_state_machine to READY when armed.",
       "mavCmd": 31010,
       "compId": 1,
       "param1": 3

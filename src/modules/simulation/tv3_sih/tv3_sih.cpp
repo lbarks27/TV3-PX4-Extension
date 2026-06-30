@@ -16,11 +16,9 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/tv3_engine_command.h>
-#include <uORB/topics/tv3_engine_state.h>
-#include <uORB/topics/tv3_gimbal_command.h>
-#include <uORB/topics/tv3_plant_wrench.h>
-#include <uORB/topics/tv3_status.h>
+#include <uORB/topics/tv3_mix_eng_cmd.h>
+#include <uORB/topics/tv3_lc_eng_st.h>
+#include <uORB/topics/tv3_sih_wrench.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_attitude_euler.h>
@@ -28,6 +26,9 @@
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_local_position.h>
 #include <math.h>
+
+#include "lib/tv3_engine_geometry.hpp"
+#include "lib/tv3_msg_fields.hpp"
 #include <errno.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -38,6 +39,13 @@ using matrix::Eulerf;
 using matrix::Quatf;
 using matrix::Vector;
 using matrix::Vector3f;
+using tv3::commanded_pitch_deg;
+using tv3::commanded_yaw_deg;
+using tv3::expected_motor_mass_kg;
+using tv3::expected_thrust_n;
+using tv3::filtered_thrust_n;
+using tv3::measured_thrust_n;
+using tv3::set_plant_wrench;
 
 namespace
 {
@@ -163,7 +171,7 @@ public:
 		}
 
 		PRINT_MODULE_DESCRIPTION("Deterministic TV3 SIH dynamics. "
-		"Simplified 6DOF rigid-body plant driven by per-engine gimbaled thrust vectors (CA_RK geometry). "
+		"Simplified 6DOF rigid-body plant driven by per-engine gimbaled thrust vectors (RK_G geometry). "
 		"Variable mass and COM migration; fixed diagonal inertia. Pure forward model (no guidance scaling or inverse allocation).");
 		PRINT_MODULE_USAGE_NAME("tv3_sih", "simulation");
 		PRINT_MODULE_USAGE_COMMAND("start");
@@ -223,7 +231,6 @@ private:
 
 		_engine_state_sub.update(&_engine_state);
 		_engine_command_sub.update(&_engine_command);
-		_tv3_status_sub.update(&_tv3_status);
 
 		const hrt_abstime now = hrt_absolute_time();
 		// dt from hrt (manipulated by SIH clock in run()). Clamped for safety. Integration uses this dt.
@@ -236,43 +243,28 @@ private:
 
 	void update_parameters()
 	{
-		_body_mass_kg = get_param_float("RK_BODY_MASS_KG", get_param_float("CA_RK_BODY_M", 1.0f));
-		_body_com_x_m = get_param_float("RK_BODY_COM_X_M", get_param_float("CA_RK_BODY_CMX", 0.0f));
-		_rail_length_m = get_param_float("RK_RAIL_LEN_M", 0.0f);
+		_body_mass_kg = get_param_float("RK_BODY_MASS_KG", 1.0f);
+		_body_com_x_m = get_param_float("RK_BODY_COM_X_M", 0.0f);
 
 		_home_lat_deg = get_param_float("SIH_LOC_LAT0", 47.397742f);
 		_home_lon_deg = get_param_float("SIH_LOC_LON0", 8.545594f);
 		_home_alt_m = get_param_float("SIH_LOC_H0", 488.0f);
 
-		// Load per-group geometry (positions relative to reference, axes, fractions, trims).
-		// These are the same CA_RK_G* params used by ActuatorEffectivenessTV3.
-		int32_t grp_cnt = get_param_int32("CA_RK_GRP_CNT", 0);
-		_num_groups = math::constrain(grp_cnt, 0, (int32_t)tv3_engine_command_s::MAX_ENGINES);
+		tv3::EngineGeometry geometry{};
+		tv3::load_engine_geometry(geometry);
+		_num_groups = geometry.engine_count;
 
 		for (int i = 0; i < _num_groups; ++i) {
-			char buf[32];
-			auto getg = [&](const char *suffix, float def) -> float {
-				snprintf(buf, sizeof(buf), "CA_RK_G%d_%s", i, suffix);
-				return get_param_float(buf, def);
-			};
-
-			_groups[i].position(0) = getg("PX", 0.f);
-			_groups[i].position(1) = getg("PY", 0.f);
-			_groups[i].position(2) = getg("PZ", 0.f);
-
-			Vector3f tax{getg("AX", 1.f), getg("AY", 0.f), getg("AZ", 0.f)};
-			Vector3f pax{getg("PAX", 0.f), getg("PAY", -1.f), getg("PAZ", 0.f)};
-			Vector3f yax{getg("YAX", 0.f), getg("YAY", 0.f), getg("YAZ", -1.f)};
-
-			_groups[i].thrust_axis = normalize_or_default(tax, Vector3f{1.f, 0.f, 0.f});
-			_groups[i].pitch_axis  = normalize_or_default(pax, Vector3f{0.f, -1.f, 0.f});
-			_groups[i].yaw_axis    = normalize_or_default(yax, Vector3f{0.f, 0.f, -1.f});
-
-			_groups[i].thrust_fraction = getg("TF", _num_groups > 0 ? 1.f / _num_groups : 1.f);
-			_groups[i].pitch_trim = getg("PTR", 0.f);
-			_groups[i].yaw_trim   = getg("YTR", 0.f);
-			_groups[i].pitch_max_rad = math::radians(getg("PMAX", 5.f));
-			_groups[i].yaw_max_rad = math::radians(getg("YMAX", 5.f));
+			const tv3::EngineMountGeometry &engine = geometry.engines[i];
+			_groups[i].position = engine.position;
+			_groups[i].thrust_axis = engine.thrust_axis;
+			_groups[i].pitch_axis = engine.pitch_axis;
+			_groups[i].yaw_axis = engine.yaw_axis;
+			_groups[i].thrust_fraction = engine.thrust_fraction;
+			_groups[i].pitch_trim = engine.pitch_trim;
+			_groups[i].yaw_trim = engine.yaw_trim;
+			_groups[i].pitch_max_rad = engine.pitch_max_rad;
+			_groups[i].yaw_max_rad = engine.yaw_max_rad;
 		}
 
 		// Inertia (diagonal only, body frame). Loaded from RK_I** (populated by manifest via
@@ -293,11 +285,13 @@ private:
 	{
 		float mass = math::max(_body_mass_kg, 0.1f);
 		const int count = math::constrain(static_cast<int>(_engine_state.engine_count), 0,
-						  static_cast<int>(tv3_engine_state_s::MAX_ENGINES));
+						  static_cast<int>(tv3_lc_eng_st_s::MAX_ENGINES));
 
 		for (int i = 0; i < count; ++i) {
-			if (PX4_ISFINITE(_engine_state.expected_motor_mass_kg[i])) {
-				mass += math::max(_engine_state.expected_motor_mass_kg[i], 0.f);
+			const float motor_mass = expected_motor_mass_kg(_engine_state, i);
+
+			if (PX4_ISFINITE(motor_mass)) {
+				mass += math::max(motor_mass, 0.f);
 			}
 		}
 
@@ -312,12 +306,17 @@ private:
 		Vector3f weighted{_body_com_x_m, 0.f, 0.f};
 		float total = m;
 
-		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
+		const int neng = math::min(_num_groups, (int)tv3_lc_eng_st_s::MAX_ENGINES);
 
 		for (int i = 0; i < neng; ++i) {
 			float mi = 0.f;
-			if (i < tv3_engine_state_s::MAX_ENGINES && PX4_ISFINITE(_engine_state.expected_motor_mass_kg[i])) {
-				mi = math::max(_engine_state.expected_motor_mass_kg[i], 0.f);
+
+			if (i < tv3_lc_eng_st_s::MAX_ENGINES) {
+				const float motor_mass = expected_motor_mass_kg(_engine_state, i);
+
+				if (PX4_ISFINITE(motor_mass)) {
+					mi = math::max(motor_mass, 0.f);
+				}
 			}
 			if (mi > 1e-4f) {
 				weighted += _groups[i].position * mi;
@@ -334,18 +333,18 @@ private:
 	void step_dynamics(float dt)
 	{
 		const int command_count = math::constrain(static_cast<int>(_engine_command.engine_count), 0,
-							  static_cast<int>(tv3_engine_command_s::MAX_ENGINES));
+							  static_cast<int>(tv3_mix_eng_cmd_s::MAX_ENGINES));
 
-		// Gimbal angles come from tv3_engine_command (primary + secondary).
+		// Gimbal angles come from tv3_mix_eng_cmd (primary + secondary).
 		// For collective-splay vehicles the secondary field is allocator_differential +
 		// common_splay bias (allocator still contributes to attitude on the shared actuator).
 		// The plant is a pure forward model using the total commanded angles.
-		for (int i = 0; i < command_count && i < tv3_engine_command_s::MAX_ENGINES; ++i) {
-			_cmd_pitch_rad[i] = _engine_command.commanded_pitch_deg[i] * kDegToRad;
-			_cmd_yaw_rad[i] = _engine_command.commanded_yaw_deg[i] * kDegToRad;
+		for (int i = 0; i < command_count && i < tv3_mix_eng_cmd_s::MAX_ENGINES; ++i) {
+			_cmd_pitch_rad[i] = commanded_pitch_deg(_engine_command, i) * kDegToRad;
+			_cmd_yaw_rad[i] = commanded_yaw_deg(_engine_command, i) * kDegToRad;
 		}
 
-		for (int i = command_count; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
+		for (int i = command_count; i < tv3_mix_eng_cmd_s::MAX_ENGINES; ++i) {
 			_cmd_pitch_rad[i] = 0.f;
 			_cmd_yaw_rad[i] = 0.f;
 		}
@@ -356,7 +355,7 @@ private:
 		{
 			float slew_dps = get_param_float("RK_TVC_SLEW_DPS", 220.f);
 			float max_step = math::max(slew_dps * kDegToRad * math::max(dt, 0.001f), 0.f);
-			for (int i = 0; i < tv3_engine_command_s::MAX_ENGINES; ++i) {
+			for (int i = 0; i < tv3_mix_eng_cmd_s::MAX_ENGINES; ++i) {
 				_applied_pitch_rad[i] = math::constrain(_cmd_pitch_rad[i],
 					_applied_pitch_rad[i] - max_step, _applied_pitch_rad[i] + max_step);
 				_applied_yaw_rad[i] = math::constrain(_cmd_yaw_rad[i],
@@ -371,7 +370,7 @@ private:
 		Vector3f engine_force_b{0.f, 0.f, 0.f};
 		Vector3f engine_tau_b{0.f, 0.f, 0.f};
 
-		const int neng = math::min(_num_groups, (int)tv3_engine_state_s::MAX_ENGINES);
+		const int neng = math::min(_num_groups, (int)tv3_lc_eng_st_s::MAX_ENGINES);
 		for (int i = 0; i < neng; ++i) {
 			const float thr = effective_thrust_n(i);
 			if (thr < 1e-3f) {
@@ -392,51 +391,11 @@ private:
 		Vector3f force_b = engine_force_b;
 		Vector3f tau_b = engine_tau_b;
 
-		publish_gimbal_command();
-
 		// Translational (world/NED z-down)
 		// Rotate body force to world. In PX4 matrix Quatf, rotateVector(v_body) produces v_world for the attitude quat.
 		Vector3f f_world = _att_q.rotateVector(force_b);
 		const Vector3f g_world{0.f, 0.f, kGravityMps2};
 		Vector3f a_world = f_world / math::max(mass, 0.1f) + g_world;
-
-		// Rail constraint (kinematic lock). During boost/ignition use tv3_status.rail_exit so the
-		// plant and mode manager agree on release timing (integrated rail distance, not altitude).
-		// Pre-boost, fall back to altitude below rail length for pad hold.
-		const bool powered_boost = _tv3_status.mode == tv3_status_s::MODE_BOOST
-					   || _tv3_status.mode == tv3_status_s::MODE_IGNITION_PENDING;
-		bool on_rail = false;
-
-		if (_rail_length_m > 0.f) {
-			if (powered_boost) {
-				on_rail = !_tv3_status.rail_exit;
-			} else {
-				on_rail = -_position(2) < _rail_length_m;
-			}
-		}
-
-		if (_prev_on_rail && !on_rail) {
-			_omega_b.zero();
-			_angular_velocity.zero();
-			_rail_torque_scale = 0.f;
-			_rail_release_us = hrt_absolute_time();
-		}
-
-		_prev_on_rail = on_rail;
-
-		bool skip_attitude_integration = false;
-		if (on_rail) {
-			a_world(0) = 0.f;
-			a_world(1) = 0.f;
-			_velocity(0) = 0.f;
-			_velocity(1) = 0.f;
-			_position(0) = 0.f;
-			_position(1) = 0.f;
-			_omega_b(0) = 0.f;
-			_omega_b(1) = 0.f;
-			_omega_b(2) = 0.f;
-			skip_attitude_integration = true;  // hold orientation
-		}
 
 		_velocity += a_world * dt;
 		_position += _velocity * dt;
@@ -466,48 +425,24 @@ private:
 		const float rate_damp_nm = get_param_float("RK_SIH_RATE_DAMP", 0.f);
 		Vector3f tau_net = tau_b - omega_x_Iw;
 
-		if (!on_rail && rate_damp_nm > 0.f) {
+		if (rate_damp_nm > 0.f) {
 			tau_net -= _omega_b * rate_damp_nm;
 		}
 
-		// Rail is kinematic: it holds attitude and absorbs disturbance torques from thrust
-		// imbalance. Without this, the first free-flight step applies the full instantaneous
-		// torque while omega is still zero, producing an impulsive spin (BS-021).
-		float rail_torque_scale = 1.f;
-
-		if (on_rail) {
-			rail_torque_scale = 0.f;
-		} else if (_rail_release_us > 0) {
-			const float ramp_s = get_param_float("RK_SIH_RAIL_RAMP", 0.05f);
-
-			if (ramp_s > 1e-6f) {
-				const float elapsed_s = (hrt_absolute_time() - _rail_release_us) * 1e-6f;
-				rail_torque_scale = math::constrain(elapsed_s / ramp_s, 0.f, 1.f);
-			}
-		}
-
-		tau_net *= rail_torque_scale;
-		_rail_torque_scale = rail_torque_scale;
-
-		publish_plant_wrench(on_rail, rail_torque_scale, force_b, tau_b, tau_net);
+		publish_plant_wrench(force_b, tau_b, tau_net);
 
 		const Vector3f alpha_b{_inertia_inv(0) * tau_net(0),
 				       _inertia_inv(1) * tau_net(1),
 				       _inertia_inv(2) * tau_net(2)};
 
-		if (!skip_attitude_integration) {
-			_omega_b += alpha_b * dt;
+		_omega_b += alpha_b * dt;
 
-			// Attitude integration (first-order quat Euler + normalize). Sufficient at 400 Hz sim step.
-			// \dot q = 1/2 q \otimes [0, omega]
-			Quatf omega_q(0.f, _omega_b(0), _omega_b(1), _omega_b(2));
-			Quatf qdot = _att_q * omega_q * 0.5f;
-			_att_q = _att_q + (qdot * dt);
-			_att_q.normalize();
-		} else {
-			// While on rail, hold attitude fixed (rail counters torques); omega already zeroed.
-			_omega_b.zero();
-		}
+		// Attitude integration (first-order quat Euler + normalize). Sufficient at 400 Hz sim step.
+		// \dot q = 1/2 q \otimes [0, omega]
+		Quatf omega_q(0.f, _omega_b(0), _omega_b(1), _omega_b(2));
+		Quatf qdot = _att_q * omega_q * 0.5f;
+		_att_q = _att_q + (qdot * dt);
+		_att_q.normalize();
 
 		// Sync legacy state for publish / old consumers
 		_angular_velocity = _omega_b;
@@ -627,10 +562,6 @@ private:
 	uint64_t _current_simulation_time_us{0};
 	float _body_mass_kg{1.f};
 	float _body_com_x_m{0.f};
-	float _rail_length_m{0.f};
-	bool _prev_on_rail{false};
-	hrt_abstime _rail_release_us{0};
-	float _rail_torque_scale{1.f};
 	float _home_lat_deg{47.397742f};
 	float _home_lon_deg{8.545594f};
 	float _home_alt_m{488.f};
@@ -639,10 +570,10 @@ private:
 		Vector3f _angular_velocity{};
 		Vector3f _specific_force{0.f, 0.f, -kGravityMps2};
 		Vector3f _euler{};
-	tv3_engine_state_s _engine_state{};
-	tv3_engine_command_s _engine_command{};
+	tv3_lc_eng_st_s _engine_state{};
+	tv3_mix_eng_cmd_s _engine_command{};
 
-	// Proper 6DOF state (replaces puppet euler/attitude logic)
+	// Body +X thrust axis vertical at launch (same orientation as prior SIH pad pose, without rail constraint).
 	Quatf _att_q{AxisAnglef(Vector3f{0.f, 1.f, 0.f}, M_PI_F * 0.5f)};
 	Vector3f _omega_b{};   // body rates
 
@@ -651,33 +582,35 @@ private:
 	Vector3f _inertia_diag{0.144f, 0.144f, 0.010f};
 	Vector3f _inertia_inv{1.f/0.144f, 1.f/0.144f, 1.f/0.010f};
 
-	// Geometry loaded from CA_RK_* params (matches allocator effectiveness model)
-	EngineGroup _groups[tv3_engine_command_s::MAX_ENGINES]{};
+	// Geometry loaded from RK_G* params
+	EngineGroup _groups[tv3_mix_eng_cmd_s::MAX_ENGINES]{};
 	int _num_groups{0};
 
 	// Latest per-engine gimbal commands (from TV3EngineCommand). These are the "desired".
-	float _cmd_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
-	float _cmd_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _cmd_pitch_rad[tv3_mix_eng_cmd_s::MAX_ENGINES]{};
+	float _cmd_yaw_rad[tv3_mix_eng_cmd_s::MAX_ENGINES]{};
 
 
 	// Actually applied (rate-limited) angles used for thrust direction this tick. Provides basic actuator dynamics in plant.
-	float _applied_pitch_rad[tv3_engine_command_s::MAX_ENGINES]{};
-	float _applied_yaw_rad[tv3_engine_command_s::MAX_ENGINES]{};
+	float _applied_pitch_rad[tv3_mix_eng_cmd_s::MAX_ENGINES]{};
+	float _applied_yaw_rad[tv3_mix_eng_cmd_s::MAX_ENGINES]{};
 
 	// Robust thrust selection used by SIH plant and other consumers. Prefers filtered,
 	// falls back to measured then expected. Duplicated in mode_manager etc; kept local
 	// to avoid cross-module dependency for the simple plant.
 	float effective_thrust_n(int i) const
 	{
-		if (i < 0 || i >= tv3_engine_state_s::MAX_ENGINES) {
+		if (i < 0 || i >= tv3_lc_eng_st_s::MAX_ENGINES) {
 			return 0.f;
 		}
-		float thr = _engine_state.filtered_thrust_n[i];
+		float thr = filtered_thrust_n(_engine_state, i);
+
 		if (!PX4_ISFINITE(thr) || thr <= 0.f) {
-			thr = _engine_state.measured_thrust_n[i];
+			thr = measured_thrust_n(_engine_state, i);
 		}
+
 		if (!PX4_ISFINITE(thr) || thr <= 0.f) {
-			thr = _engine_state.expected_thrust_n[i];
+			thr = expected_thrust_n(_engine_state, i);
 		}
 		return math::max(thr, 0.f);
 	}
@@ -728,50 +661,22 @@ private:
 		return engine_thrust_dir_body_angles(i, p, y);
 	}
 
-	void publish_plant_wrench(bool on_rail, float rail_torque_scale, const Vector3f &force_b,
-				  const Vector3f &engine_torque_b, const Vector3f &net_torque_b)
+	void publish_plant_wrench(const Vector3f &force_b, const Vector3f &engine_torque_b, const Vector3f &net_torque_b)
 	{
-		tv3_plant_wrench_s wrench{};
+		tv3_sih_wrench_s wrench{};
 		wrench.timestamp = hrt_absolute_time();
-		wrench.on_rail = on_rail;
-		wrench.rail_torque_scale = rail_torque_scale;
-		wrench.body_force_n[0] = force_b(0);
-		wrench.body_force_n[1] = force_b(1);
-		wrench.body_force_n[2] = force_b(2);
-		wrench.engine_torque_nm[0] = engine_torque_b(0);
-		wrench.engine_torque_nm[1] = engine_torque_b(1);
-		wrench.engine_torque_nm[2] = engine_torque_b(2);
-		wrench.net_torque_nm[0] = net_torque_b(0);
-		wrench.net_torque_nm[1] = net_torque_b(1);
-		wrench.net_torque_nm[2] = net_torque_b(2);
+		wrench.on_rail = false;
+		wrench.rail_torque_scale = 1.f;
+		set_plant_wrench(wrench, force_b, engine_torque_b, net_torque_b);
 		_plant_wrench_pub.publish(wrench);
-	}
-
-	void publish_gimbal_command()
-	{
-		tv3_gimbal_command_s gimbal{};
-		gimbal.timestamp = hrt_absolute_time();
-		gimbal.engine_count = static_cast<uint8_t>(_num_groups);
-
-		for (int i = 0; i < _num_groups && i < tv3_gimbal_command_s::MAX_ENGINES; ++i) {
-			const float pitch_rad = (_applied_pitch_rad[i] != 0.f ? _applied_pitch_rad[i] : _cmd_pitch_rad[i]);
-			const float yaw_rad = (_applied_yaw_rad[i] != 0.f ? _applied_yaw_rad[i] : _cmd_yaw_rad[i]);
-			gimbal.selected_motor_index[i] = _engine_state.selected_motor_index[i];
-			gimbal.commanded_pitch_deg[i] = pitch_rad / kDegToRad;
-			gimbal.commanded_yaw_deg[i] = yaw_rad / kDegToRad;
-		}
-
-		_gimbal_command_pub.publish(gimbal);
 	}
 
 	PX4Accelerometer _px4_accel{1310988};
 	PX4Gyroscope _px4_gyro{1310988};
 
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
-	uORB::Subscription _engine_state_sub{ORB_ID(tv3_engine_state)};
-	uORB::Subscription _engine_command_sub{ORB_ID(tv3_engine_command)};
-	uORB::Subscription _tv3_status_sub{ORB_ID(tv3_status)};
-	tv3_status_s _tv3_status{};
+	uORB::Subscription _engine_state_sub{ORB_ID(tv3_lc_eng_st)};
+	uORB::Subscription _engine_command_sub{ORB_ID(tv3_mix_eng_cmd)};
 	uORB::Publication<vehicle_attitude_s> _attitude_pub{ORB_ID(vehicle_attitude)};
 	uORB::Publication<vehicle_attitude_s> _attitude_groundtruth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_attitude_euler_s> _attitude_euler_pub{ORB_ID(vehicle_attitude_euler)};
@@ -783,8 +688,7 @@ private:
 	uORB::Publication<vehicle_global_position_s> _global_position_pub{ORB_ID(vehicle_global_position)};
 	uORB::Publication<vehicle_global_position_s> _global_position_groundtruth_pub{ORB_ID(vehicle_global_position_groundtruth)};
 	uORB::Publication<manual_control_setpoint_s> _manual_control_pub{ORB_ID(manual_control_setpoint)};
-	uORB::Publication<tv3_gimbal_command_s> _gimbal_command_pub{ORB_ID(tv3_gimbal_command)};
-	uORB::Publication<tv3_plant_wrench_s> _plant_wrench_pub{ORB_ID(tv3_plant_wrench)};
+	uORB::Publication<tv3_sih_wrench_s> _plant_wrench_pub{ORB_ID(tv3_sih_wrench)};
 };
 
 extern "C" __EXPORT int tv3_sih_main(int argc, char *argv[])

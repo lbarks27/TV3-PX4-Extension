@@ -1,7 +1,0 @@
-# TV3 PX4 extension runtime defaults.
-#
-# Copy this file to /fs/microsd/etc/config.txt on the target hardware.
-
-set TV3_ROOT /fs/microsd/tv3
-set TV3_AIRFRAME ${TV3_ROOT}/airframes/tv3_v1.params
-set TV3_MOTOR_ROOT ${TV3_ROOT}/motors

@@ -1,0 +1,41 @@
+uint64 timestamp
+uint64 timestamp_sample
+
+uint8 MAX_ENGINES = 3
+uint8 engine_count
+uint8 ignition_mask
+uint8 active_mask
+uint8 confirmed_mask
+uint8 fault_mask
+
+bool sequence_active
+bool sequence_complete
+bool all_ignited
+
+uint8 active_ignition_index
+
+float32 measured_thrust_n_0
+float32 measured_thrust_n_1
+float32 measured_thrust_n_2
+float32 filtered_thrust_n_0
+float32 filtered_thrust_n_1
+float32 filtered_thrust_n_2
+float32 expected_thrust_n_0
+float32 expected_thrust_n_1
+float32 expected_thrust_n_2
+float32 expected_motor_mass_kg_0
+float32 expected_motor_mass_kg_1
+float32 expected_motor_mass_kg_2
+float32 burn_fraction_0
+float32 burn_fraction_1
+float32 burn_fraction_2
+float32 remaining_impulse_ns_0
+float32 remaining_impulse_ns_1
+float32 remaining_impulse_ns_2
+
+uint8 fault_flags_0
+uint8 fault_flags_1
+uint8 fault_flags_2
+uint16 selected_motor_index_0
+uint16 selected_motor_index_1
+uint16 selected_motor_index_2

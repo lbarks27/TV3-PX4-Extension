@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# @name TV3 Lander (starter)
+# @type TV3
+#
+
+. ${R}etc/init.d-posix/rc.tv3_defaults
+
+. ${R}etc/init.d-posix/airframes/tv3_common.inc
